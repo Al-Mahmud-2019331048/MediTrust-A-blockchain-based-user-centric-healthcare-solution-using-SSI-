@@ -1,0 +1,47 @@
+{
+  "name": "demo",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "issuer": "npx ts-node server.ts --issuer",
+    "doctor": "npx ts-node server.ts --doctor",
+    "pharmacist": "npx ts-node server.ts --pharmacist",
+    
+    "verifier": "npx ts-node server.ts --verifier"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "keywords": [],
+  "license": "ISC",
+  "author": "",
+  "dependencies": {
+    "@hyperledger/anoncreds-nodejs": "^0.2.2",
+    "@hyperledger/aries-askar-nodejs": "^0.2.3",
+    "@hyperledger/indy-vdr-nodejs": "^0.2.2",
+    "@prisma/client": "^5.10.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "mongodb": "^6.3.0",
+    "multer": "^1.4.5-lts.2",
+    "node-fetch": "^3.3.2",
+    "typescript": "^5.7.2",
+    "jsonwebtoken": "^9.0.2"
+  },
+  "devDependencies": {
+    "@credo-ts/anoncreds": "0.5.13",
+    "@credo-ts/askar": "0.5.13",
+    "@credo-ts/core": "0.5.13",
+    "@credo-ts/indy-vdr": "0.5.13",
+    "@credo-ts/node": "0.5.13",
+    "@types/cors": "^2.8.17",
+    "@types/jsonwebtoken": "^9.0.5",
+    "@types/multer": "^1.4.12",
+    "@types/node-fetch": "^2.6.12",
+    "prisma": "^5.10.0",
+    "ts-node": "^10.9.2"
+  }
+}

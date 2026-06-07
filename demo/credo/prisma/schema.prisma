@@ -1,0 +1,29 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mongodb"
+  url      = env("DATABASE_URL")
+}
+
+model Document {
+  id         String   @id @default(auto()) @map("_id") @db.ObjectId
+  documentId String   @unique // UUID for the document
+  patientDid String
+  content    Bytes    // Binary content of the document
+  fileName   String
+  mimeType   String
+  sha256     String
+  docType    String
+  issuedBy   String
+  issuedAt   DateTime @default(now())
+  signature  String   // Document signature for verification
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([patientDid])
+}
