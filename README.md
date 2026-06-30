@@ -1,611 +1,281 @@
-# 🔐 Self-Sovereign Identity (SSI) Tutorial
-
-### Table of content
-
-- [🎯 What is SSI](#-self-sovereign-identity-ssi-tutorial)
-- [🔑 Key Concepts](#-key-concepts-of-ssi)
-- [✨ Benefits](#-key-benefits-of-ssi)
-- [🔄 Trust Triangle](#-the-trust-triangle)
-- [💡 How SSI Works](#-how-ssi-works-in-real-life)
-  - [🏛️ Issuer](#1-issuer)
-  - [👤 Holder](#2-holder-you)
-  - [✅ Verifier](#3-verifier-the-checker)
-- [⚙️ Technical Workflow](#️-technical-workflow-of-ssi-entities)
-- [🚀 Demonstration Setup Guide](#-demonstration-setup-guide)
-   - [Framework Comparison](#-framework-comparison)
-   - [Similarities](#-similarities)
-   - [Differences](#-differences)
-   - [Testing Setup](#-testing-the-setup)
-- [📚 API Overview](#-api-overview)
-- [🎉 Conclusion](#conclusion)
-- [📧 Contact](#-contact)
-
-![SSI Banner](demo/credo/assets/what-is-ssi.png)
-
-<br>
-
-> 💫 **Self-Sovereign Identity (SSI)** is a digital identity model that allows individuals to own, control, and share their personal information without relying on a central authority. In SSI, users can create and manage their identities using decentralized technologies, such as blockchain, which enhances privacy, security, and user autonomy.
-
-<br>
-
-## 🔑 Key Concepts of SSI
-
-<div align="center">
-
-| Concept                                                     | Traditional Way                                                                              | SSI Way                                                           | Benefits                                                                                                                     |
-| ----------------------------------------------------------- | -------------------------------------------------------------------------------------------- | ----------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
-| **🎯 Decentralization** <br> _"You're in Control"_          | Need Facebook/Google accounts to log into websites. Companies control your digital identity. | You control your own digital identity, like your physical wallet. | • No dependency on companies <br> • Full control over your identity <br> • Single identity for all services                  |
-| **📜 Verifiable Credentials** <br> _"Digital Certificates"_ | Physical certificates and ID cards in your wallet.                                           | Digital versions of certificates that can't be forged.            | • Can't be faked or altered <br> • Instant sharing <br> • Selective disclosure <br> • Digital signatures from issuers        |
-| **🆔 DIDs** <br> _"Your Digital Identity Number"_           | Email address or phone number owned by companies.                                            | Your own unique digital ID that belongs only to you.              | • You own it completely <br> • Not controlled by companies <br> • Can't be taken away <br> • Permanent digital address       |
-| **💼 Wallets** <br> _"Your Digital Identity Vault"_         | Physical wallet with ID cards, certificates, and licenses.                                   | Secure app storing digital credentials.                           | • Digital storage of IDs <br> • Enhanced security <br> • Selective sharing <br> • User control                               |
-| **🤝 Trust triangle** <br> _"The Circle of Trust"_          | Trust based on physical documents issued by authorities.                                     | Digital credentials verified instantly through cryptography.      | • Instant verification <br> • Cryptographically secure <br> • No need to contact issuer <br> • Selective information sharing |
-
-</div>
-
-<br>
-
-## ✨ Key Benefits of SSI
-
-<div align="center">
-
-| 📄 Physical Documents            | 📱 Digital SSI               |
-| -------------------------------- | ---------------------------- |
-| Can be lost or stolen            | Securely backed up           |
-| Show all information             | Share only what's needed     |
-| Manual verification needed       | Instant verification         |
-| Multiple documents to carry      | All-in-one digital solution  |
-| Can be forged                    | Cryptographically secure     |
-| Physical presence often required | Remote verification possible |
-
-</div>
-
-<br>
-
-## 🔄 The Trust Triangle
-
-![Trust-Triangle](demo/credo/assets/SSI-Trust-Triangle.jpg)
-
-<br>
-
-> 🤝 The Trust Triangle is a foundational concept in Self-Sovereign Identity that illustrates the relationships between the three key parties involved in identity verification:
-
-<br>
-
-### Key Participants
-
-<div style="padding: 20px;">
-
-1. 🏛️ **The Issuer**
-   > The trusted authority that issues verifiable credentials to the holder. This could be an educational institution, government agency, or any organization that can validate the information.
-
-<br>
-
-2. 👤 **The Holder**
-   > The individual or entity that owns the identity and holds the credentials. They have full control over their personal information and can choose what to share.
-
-<br>
-
-3. ✅ **The Verifier**
-   > The party that needs to verify the holder's credentials. This could be a service provider, employer, or any entity that requires proof of identity or qualifications.
-
-</div>
-
-<div style="background-color: #f6f8fa; padding: 20px; border-radius: 6px; margin: 20px 0;">
-
-💫 **Key Insight**: The Trust Triangle emphasizes that trust is established through the relationships between these three parties, allowing for secure and private interactions without the need for a central authority.
-
-</div>
-
-<br>
-
-## 💡 How SSI Works in Real Life
-
-<div style="background-color: #f8f9fa; padding: 20px; border-radius: 8px; margin: 20px 0;">
-
-### 1. 🏛️ Issuer
-
-<div style="border-left: 4px solid #007bff; padding-left: 20px; margin: 15px 0;">
-Think of this as a university, government, or any organization that issues official documents
-</div>
-
-#### What They Do:
-
-- Creates official digital documents (like a digital version of your degree)
-- Ensures each document follows a standard format
-- Adds their official digital signature
-- Makes sure their documents can be verified by others
-
-#### Real-Life Example:
-
-> Just like a university issues paper degrees, in SSI they:
-
-- Create digital degrees that can't be forged
-- Include all necessary information (grades, date, major)
-- Sign it digitally (like a traditional university seal)
-
-</div>
-
-<br>
-
-<div style="background-color: #f8f9fa; padding: 20px; border-radius: 8px; margin: 20px 0;">
-
-### 2. 👤 Holder (You)
-
-<div style="border-left: 4px solid #28a745; padding-left: 20px; margin: 15px 0;">
-This is you - the person who receives and owns the credentials
-</div>
-
-#### What You Can Do:
-
-- Have a digital wallet on your phone (like Apple Wallet, but for your ID documents)
-- Receive official documents from organizations
-- Store them securely in your digital wallet
-- Share only what you want, when you want
-
-#### Real-Life Example:
-
-> Just like your physical wallet, but better:
-
-- Store your university degree, driver's license, and certificates digitally
-- Choose what to share (show age without revealing address)
-- No risk of losing physical documents
-
-</div>
-
-<br>
-
-<div style="background-color: #f8f9fa; padding: 20px; border-radius: 8px; margin: 20px 0;">
-
-### 3. ✅ Verifier (The Checker)
-
-<div style="border-left: 4px solid #dc3545; padding-left: 20px; margin: 15px 0;">
-Think of this as an employer or any organization that needs to verify your credentials
-</div>
-
-#### What They Do:
-
-- Ask for specific information they need
-- Verify your digital documents instantly
-- Trust the documents without calling the issuer
-- Only see what you choose to share
-
-#### Real-Life Example:
-
-> When applying for a job:
-
-- Employer asks for proof of degree
-- You share just the relevant details from your digital degree
-- They can verify it's real instantly
-- No need to call the university to check
-
-</div>
-
-## ⚙️ Technical Workflow of SSI Entities
-
-![technical-work-flow](demo/credo/assets/technical-work-flow.png)
-
-### 🔧 Initial Setup
-
-<div style="background-color: #f8f9fa; padding: 20px; border-radius: 8px; margin: 20px 0;">
-
-1. 🆔 **DID Creation and Registration**
-   <div style="border-left: 4px solid #007bff; padding-left: 20px; margin: 15px 0;">
-
-   - Issuer creates and registers institutional DID on ledger
-   - Holder creates personal DID for identity management
-   - Verifier establishes organizational DID for verification purposes
-   </div>
-
-2. 📋 **Schema Registration (by Issuer)**
-   <div style="border-left: 4px solid #28a745; padding-left: 20px; margin: 15px 0;">
-
-   - A schema defines the structure of the credentials that can be issued. It includes attributes such as name, version, and the specific data fields that will be included in the credential.
-   - Issuer registers schema on the ledger
-   - Example attributes: `name`, `date`, `degree_type`, `institution`
-   </div>
-
-3. 📝 **Credential Definition Setup (by Issuer)**
-   <div style="border-left: 4px solid #dc3545; padding-left: 20px; margin: 15px 0;">
-   
-   - A credential definition links a schema to a specific credential type and includes additional metadata, such as the issuer's DID and the credential's unique identifier. This allows for the creation of verifiable credentials based on the registered schema.
-   - Issuer publishes credential definition to ledger.
-   </div>
-</div>
-
-### 🔄 Credential Issuance and Verification
-
-<div style="background-color: #f8f9fa; padding: 20px; border-radius: 8px; margin: 20px 0;">
-
-#### A. 📤 Credential Issuance Flow
-
-1. **Connection Establishment**
-   <div style="border-left: 4px solid #17a2b8; padding-left: 20px; margin: 15px 0;">
-
-   - Issuer and holder create secure DID connection
-   - Exchange connection protocols
-   - Establish encrypted channel
-   </div>
-
-2. **Credential Creation**
-   <div style="border-left: 4px solid #6f42c1; padding-left: 20px; margin: 15px 0;">
-
-   - Issuer prepares credential data
-   - Maps data to schema structure
-   - Generates cryptographic signatures
-   - Issues credential to holder's wallet
-   </div>
-
-#### B. 💼 Credential Storage
-
-1. **Holder's Wallet**
-   <div style="border-left: 4px solid #fd7e14; padding-left: 20px; margin: 15px 0;">
-
-   - Securely stores received credentials
-   - Maintains proof requests history
-   - Handles key management
-   </div>
-
-#### C. ✅ Verification Flow
-
-1. **Proof Request**
-   <div style="border-left: 4px solid #20c997; padding-left: 20px; margin: 15px 0;">
-
-   - Verifier sends proof request
-   - Specifies required attributes
-   - Defines predicates (if any)
-   </div>
-
-2. **Proof Generation**
-   <div style="border-left: 4px solid #e83e8c; padding-left: 20px; margin: 15px 0;">
-
-   - Holder receives proof request
-   - Selects appropriate credentials
-   - Generates zero-knowledge proofs
-   - Creates proof presentation
-   </div>
-
-3. **Verification Process**
-   <div style="border-left: 4px solid #6c757d; padding-left: 20px; margin: 15px 0;">
-   
-   - Verifier receives proof presentation
-   - Validates cryptographic signatures
-   - Checks revocation status
-   - Verifies credential claims
-   </div>
-</div>
-
-## 🚀 Demonstration Setup Guide
-
-<div style="background-color: #f8f9fa; padding: 20px; border-radius: 8px; margin: 20px 0;">
-
-We will use two different frameworks (Credo and ACAPY) to demonstrate the SSI workflow. Use any one of them. 
-
-
-### 🔄 Framework Comparison
-
-#### ACApy (Aries Cloud Agent Python)
-- **Language**: Python
-- **Focus**: Enterprise-grade SSI solutions
-- **Key Features**:
-  - Robust credential management
-  - Advanced protocol support
-  - Extensive configuration options
-  - Two API versions (v1 and v2)
-- **[Detailed Setup Guide](demo/acapy/README.md)**
-
-#### Credo (Aries Framework JavaScript)
-- **Language**: JavaScript/TypeScript
-- **Focus**: Modern web and mobile SSI solutions
-- **Key Features**:
-  - Easy web integration
-  - Mobile-friendly
-  - Modern JavaScript ecosystem
-- **[Detailed Setup Guide](demo/credo/README.md)**
-
-<br>
-
-### 🎯 Similarities
-1. **Core Functionality**
-   - DID management
-   - Credential issuance
-   - Proof verification
-   - Connection protocols
-
-2. **Standards Compliance**
-   - W3C DID specifications
-   - Verifiable Credentials
-   - DIDComm protocols
-
-3. **Security Features**
-   - Secure messaging
-   - Encryption standards
-   - Key management
-
-<br>
-
-### 🔄 Differences
-
-| Feature | ACApy | Credo |
-|---------|-------|-------|
-| **Language** | Python | JavaScript |
-| **API Versions** | v1 and v2 | Single version |
-| **Setup Complexity** | More complex | Simpler |
-| **Target Use** | Enterprise | Web/Mobile |
-
-
-<br>
-
-### 🎯 Common Issues & Solutions in Setup
-
-1. **Connection Issues**
-   - Ensure ngrok is running and URL is correctly set
-   - Check if ports are not in use
-   - Verify network connectivity
-
-2. **Wallet Errors**
-   - Clear previous wallet data if exists
-   - Check permissions and storage
-
-3. **Ledger Connection**
-   - Verify genesis URL is accessible
-   - Check network connectivity
-
-</div>
-
-
-### 🧪 Testing the Setup
-
-<div style="border-left: 4px solid #28a745; padding-left: 20px; margin: 15px 0;">
-
-#### 1. 🔗 Create Connection
-
-- Generate invitation from issuer interface
-- Scan the generated QR code by Bifold wallet (Holder's wallet)
-
-#### 2. 📜 Issue Credential
-
-- Issuer will send a credential offer to your connected wallet (Bifold wallet)
-
-#### 3. ✅ Accept Credential
-
-- Open the credential offer and accept credential from the wallet
-
-#### 4. 🔍 Verify Credential
-- An issuer also can act as a verifier. Because sometimes issuer needs to verify your issued credential.
-- In this setup, issuer will send you a credential proof request after credential issuance.
-- Share your credential in the proof request.
-
-Or, if you want to use different verifier:
-- Generate invitation from verifier agent
-- Scan the generated QR code by Bifold wallet (Holder's wallet)
-- Send proof request to the holder
-- Share proof from the Bifold wallet
-- Verify received proof
-
-### 🎥 
-
-![Demo](demo/acapy/assets/trust-triangle-demo.gif)
-
-For better view: [Youtube link](https://www.youtube.com/watch?v=yzG49VHNaTs&ab_channel=ArifShahriar) 
-
-## 🚀 API Overview
-
-This API provides endpoints for managing agents, credentials, and interactions in an SSI ecosystem. Below are the key routes defined in `server.ts`.
-
-ACAPY provides two API versions (v1 and v2) with different features and capabilities.
-
-### API Versions for ACAPY
-
-#### 🔷 Version 1 (v1)
-The legacy API version, still widely used and supported. (Will be removed in the upcoming acapy versions)
-```bash
-# Base URL format
-http://localhost:{port}/v1/
+# MediTrust — Blockchain-based Patient-Centric Healthcare SSI System
+
+A thesis implementation of a **decentralized, patient-centric healthcare identity system** using Self-Sovereign Identity (SSI) built on Hyperledger Indy + Credo-TS, with Decentralized Web Nodes (DWN) replacing centralized MongoDB for off-chain medical record storage.
+
+---
+
+## What This Project Is
+
+MediTrust implements the SSI trust triangle (Issuer → Holder → Verifier) in a healthcare context. Patients own their identity and medical data — no central authority stores or controls it. The system uses:
+
+- **Hyperledger Indy** (BCovrin TestNet) as the permissioned blockchain ledger for DIDs, schemas, and credential definitions
+- **Credo-TS** (Aries Framework JavaScript) as the SSI agent framework
+- **AnonCreds** for zero-knowledge proof selective disclosure
+- **DWN** (`@web5/api`) as the decentralized off-chain storage layer (replacing MongoDB from the original PoC)
+- **AES-256** encryption for medical records at rest (new — the original PoC only hashed, never encrypted)
+
+---
+
+## Repository Structure
+
+```
+.
+├── CONTEXT.md                   — session context, locked decisions, open questions (read this first)
+├── README.md                    — this file
+│
+├── demo/                        — legacy PoC (Credo-TS + Express + MongoDB), kept for reference
+│   └── credo/                   — working SSI agent: server.ts, agent.ts, module.ts, network.ts
+│
+├── interface/                   — legacy Next.js 15 frontend portals, kept for reference
+│   └── src/app/                 — government/, doctor/, pharmacist/, patient/, verifier/ pages
+│
+├── agents/                      — NEW: Credo-TS + Indy SSI agents (4 independent processes)
+│   ├── government-agent/        — issues patient identity credentials
+│   ├── doctor-agent/            — verifies identity, issues medical document credentials
+│   ├── pharmacy-agent/          — verifies identity + prescription, dispenses
+│   ├── healthcare-authority-agent/ — NEW: issues doctor/hospital licensing creds + revocation
+│   └── shared/                  — common Credo module/network/types config (no duplication)
+│
+├── dwn/                         — NEW: Decentralized Web Node layer (replaces MongoDB)
+│   ├── patient-node/            — patient's own DWN instance
+│   └── provider-node/           — provider's DWN instance
+│
+├── edge/                        — NEW: thin clients driving the 14-step auth+permission dataflow
+│   ├── patient-edge/
+│   └── provider-edge/
+│
+├── bridge/                      — NEW: orchestrates Credo/Indy world ↔ Web5/DWN world
+│   └── src/
+│       ├── routes/
+│       ├── services/
+│       └── coordinators/auth-flow.ts   — owns the full 14-step sequence end to end
+│
+├── crypto/
+│   ├── encryption/              — NEW: real AES-256 at rest
+│   └── sss/                     — NEW: Shamir Secret Sharing + multi-party key recovery (design pending)
+│
+├── consent/                     — NEW: Verifiable Consent Receipt VC issuance (Indy-native)
+├── audit/                       — NEW: signed, structured, immutable audit log
+│
+├── apps/
+│   └── web/                     — successor to interface/, ported once agents stabilize
+│
+├── docs/
+│   ├── architecture/
+│   └── decisions/               — ADR-style design decision records
+│
+└── infra/                       — docker-compose.yml, boot order, shared env templates
 ```
 
-#### 🔷 Version 2 (v2)
-The newer API version with enhanced features and improved consistency.
+---
+
+## What Is Already Built (Legacy PoC — `demo/` + `interface/`)
+
+The original proof-of-concept is fully working and serves as the adaptation base for the new build.
+
+### Backend (`demo/credo/`)
+
+| File | Lines | Purpose |
+|------|-------|---------|
+| `server.ts` | 1799 | Express app, all route handlers, agent lifecycle, in-memory proof cache |
+| `agent.ts` | 580 | `BaseAgent` — Credo Agent wrapper, DID ops, credential issuance |
+| `document-routes.ts` | 627 | 6 document endpoints (upload, issue, verify, share, download) |
+| `document-storage.ts` | 281 | MongoDB CRUD with SHA-256 hashing + JWT signing |
+| `document-service.ts` | 211 | Service layer between routes and storage |
+| `module.ts` | 55 | Credo module assembly |
+| `network.ts` | 24 | BCovrin TestNet genesis config |
+| `agent.ts` | — | `BaseAgent` class: DID creation, credential issuance, proof requests |
+
+**Three agents run as independent Node.js processes:**
+
+| Agent | API Port | DIDComm Port |
+|-------|----------|--------------|
+| Issuer (Government) | 4000 | 4001 |
+| Doctor | 4002 | 4003 |
+| Pharmacist | 4004 | 4005 |
+
+### Frontend (`interface/`)
+
+Stack: Next.js 15 + React 18 + Tailwind CSS + `apiService.js` (centralized HTTP client)
+
+| Page | Purpose |
+|------|---------|
+| `/government` | 4-step wizard: connect → issue identity credential |
+| `/doctor` | 5-step wizard: connect → verify identity → upload document → issue credential |
+| `/pharmacist` | 4-step wizard: connect → verify identity → verify prescription → retrieve document |
+| `/patient` | Simulated wallet UI (mock data — real holder role lives in the Bifold mobile app) |
+| `/verifier` | Generic verifier stepper |
+
+### Existing Credential Flows
+
+1. **Government issues identity credential** — patient scans QR, accepts AnonCreds credential with `name`, `age`, `email`, `nationalId`, `medicalCondition`, `bloodType`, `emergencyContact`
+2. **Doctor verifies patient + issues prescription** — doctor requests ZKP proof restricted to government cred-def, then uploads document (stored in MongoDB as SHA-256 hash + JWT-signed), issues document metadata as credential to patient
+3. **Pharmacist verifies identity + prescription** — double proof-request chain, then retrieves document from MongoDB and dispenses
+
+### Known Gaps in the Legacy PoC (What This Build Closes)
+
+| Gap | Detail |
+|-----|--------|
+| Storage is centralized (MongoDB) | Directly contradicts the decentralization thesis claim |
+| No real encryption | SHA-256 hashing + JWT signing only — records were never encrypted at rest |
+| Consent is implicit | No explicit Verifiable Consent Receipt VC issued when patient grants access |
+| Audit trail is weak | Only MongoDB timestamps — no signed, structured, immutable log |
+| No revocation for provider credentials | No healthcare-authority agent to revoke doctor/hospital licenses |
+| Doctor and pharmacist shared the same DID/seed | Each new agent gets its own DID |
+
+---
+
+## What We Are Implementing (New Build)
+
+All new work happens in the top-level folders (`agents/`, `dwn/`, `edge/`, `bridge/`, `crypto/`, `consent/`, `audit/`). The legacy `demo/` and `interface/` are kept as reference — not deleted, not run in parallel.
+
+### Core Architecture Change: DWN Replaces MongoDB
+
+Medical records are written to the patient's **Decentralized Web Node** (DWN) instead of a central MongoDB instance. The patient's DWN is their own data store — no provider can read it without an explicit permission grant.
+
+### The 14-Step DWN Permission + Record-Write Dataflow
+
+This is the core flow the new `dwn/`, `edge/`, and `bridge/` layers implement:
+
+1. `provider-edge` generates QR code containing provider DID
+2. `patient-edge` resolves provider DID through Indy VDR
+3. `patient-edge` retrieves patient's own DID document from local wallet
+4. `patient-edge` → `patient-node`: sends patient DID + freshly generated nonce
+5. `patient-node` → `provider-node`: forwards patient DID + nonce over HTTP
+6. `provider-node` resolves the patient DID through Indy VDR
+7. `provider-node` → `provider-edge`: sends resolved patient DID document
+8. `provider-edge` → `provider-node`: generates + sends authentication signature (provider private key)
+9. `provider-node` issues an access token to the patient node
+10. `provider-node` → `patient-node`: sends permission request
+11. `patient-node` → `patient-edge`: forwards permission request, alerts the patient
+12. `patient-edge` → `patient-node`: patient's grant/deny decision
+13. `patient-node` → `provider-node`: forwards the permission grant
+14. `provider-node` → `patient-node`: sends `RecordsWrite` message; patient node decrypts and stores
+
+`bridge/src/coordinators/auth-flow.ts` orchestrates this full sequence.
+
+### New Modules
+
+| Module | What it does | Status |
+|--------|-------------|--------|
+| `agents/healthcare-authority-agent/` | Issues doctor/hospital licensing credentials + handles revocation | Net new |
+| `agents/shared/` | Common Credo module config extracted from `demo/credo/module.ts` + `network.ts` | Net new |
+| `dwn/patient-node/` | Patient's own DWN instance; owns steps 4, 5, 10–12, 14 of the dataflow | Net new |
+| `dwn/provider-node/` | Provider's DWN instance; owns steps 5–9, 13, 14 | Net new |
+| `edge/patient-edge/` + `edge/provider-edge/` | Thin clients driving the 14-step flow | Net new |
+| `bridge/src/coordinators/auth-flow.ts` | Orchestrates the full Indy ↔ DWN auth sequence | Net new |
+| `crypto/encryption/` | Real AES-256 at rest, wired into the DWN write path | Net new |
+| `consent/` | Explicit Verifiable Consent Receipt VC (Indy-native signed credential, no smart contract) | Net new |
+| `audit/` | Signed, structured, immutable audit log | Net new |
+| `crypto/sss/` | Shamir Secret Sharing + multi-party key recovery/approval (design pending) | Net new |
+| `apps/web/` | Next.js successor to `interface/`, ported once agents stabilize | Planned |
+| `infra/docker-compose.yml` | Single-command boot of all services | Planned |
+
+### Build Order
+
+Dependencies run one direction — build in this sequence:
+
+1. `bridge/src/services/event-bus.ts` — everything else eventually publishes/subscribes through it
+2. `agents/shared/` — common config so the four agents don't each duplicate it
+3. `agents/healthcare-authority-agent/` — simplest new agent, proves the adapted pattern works
+4. `dwn/patient-node/` — start with patient-side permission flow (most thesis-relevant part)
+5. `dwn/provider-node/` — mirror of patient-node
+6. `edge/patient-edge/` + `edge/provider-edge/` — thin UIs once nodes work headless
+7. `crypto/encryption/` — wire AES-256 into the DWN write path before any real data flows
+8. `consent/` + `audit/` — attach to credential-issuance and permission-grant paths
+9. `crypto/sss/` — once recovery/approval design is settled
+10. `infra/docker-compose.yml` — last, once individual services are independently runnable
+11. `apps/web/` — port the working portal UI from `interface/` once new agents are stable
+
+---
+
+## Technology Stack
+
+### Existing (Legacy PoC)
+
+| Layer | Technology | Version |
+|-------|-----------|---------|
+| Runtime | Node.js | >=20 |
+| Language | TypeScript | 5.7.2 |
+| SSI Framework | Credo-TS | 0.5.13 |
+| Web Server | Express | 4.21 |
+| Storage | MongoDB via Prisma | 5.10 |
+| Document Signing | jsonwebtoken | 9.0.2 |
+| Ledger | Hyperledger Indy (BCovrin TestNet) via indy-vdr | 0.2.2 |
+| Wallet | Aries Askar | 0.2.3 |
+| Crypto | AnonCreds | 0.2.2 |
+| Frontend | Next.js 15 + React 18 + Tailwind CSS | — |
+
+### New (This Build)
+
+| Layer | Technology |
+|-------|-----------|
+| Off-chain storage | DWN via `@web5/api` (replaces MongoDB) |
+| Record encryption | AES-256 at rest |
+| Key recovery | Shamir Secret Sharing (`shamirs-secret-sharing` or equivalent) |
+| Consent | Verifiable Consent Receipt VC (Indy AnonCreds) |
+
+---
+
+## Running the Legacy PoC
+
+### Prerequisites
+
+- Node.js >=20
+- MongoDB instance
+- ngrok (for mobile wallet DIDComm)
+- Bifold mobile wallet (iOS/Android) — the patient holder role lives here
+
+### Backend
+
 ```bash
-# Base URL format
-http://localhost:{port}/v2/
+cd demo/credo
+yarn install
+cp .env.sample .env   # fill in DIDs, seeds, MongoDB URL, ngrok endpoints
+./setup-db.sh
+npx prisma db push
+
+# Start in three separate terminals:
+yarn issuer      # http://localhost:4000 (API) + 4001 (DIDComm)
+yarn doctor      # http://localhost:4002 (API) + 4003 (DIDComm)
+yarn pharmacist  # http://localhost:4004 (API) + 4005 (DIDComm)
 ```
 
+### ngrok (one tunnel per agent DIDComm port)
 
-## 🗂️ **API Routes**
+```bash
+ngrok http 4001   # copy URL → ISSUER_AGENT_PUBLIC_ENDPOINT in .env
+ngrok http 4003   # copy URL → DOCTOR_AGENT_PUBLIC_ENDPOINT
+ngrok http 4005   # copy URL → PHARMACIST_AGENT_PUBLIC_ENDPOINT
+```
 
-| **✨ SSI Feature**                    | **🔍 Purpose**                                        | **🔗 API Endpoint**              |
-| ------------------------------------- | ----------------------------------------------------- | -------------------------------- |
-| **🌐 Get Wallet DIDs**                | Retrieve the DIDs associated with the user's wallet.  | `GET /wallet-dids`               |
-| **📚 Register Schema**                | Create a new schema for credentials.                  | `POST /create-schema`            |
-| **📝 Register Credential Definition** | Create a new credential definition based on a schema. | `POST /credential-definition`    |
-| **🛠️ Create Connection Invitation**   | Create an invitation for a connection.                | `POST /create-invitation`        |
-| **📈 Get All Connections**            | Retrieve details about existing connections.          | `GET /connections`               |
-| **📧 Send Message**                   | Send a message to a connection.                       | `POST /send-message`             |
-| **📉 Issue Credential**               | Issue a new credential to a connection.               | `POST /issue-credential`         |
-| **📜 Get All Issued Credentials**     | Retrieve details of issued credentials.               | `GET /issued-credentials`        |
-| **📏 Send Proof Request**             | Send a proof request to a connection.                 | `POST /send-proof-request`       |
-| **📂 Get All Proof Records**          | Retrieve proof records associated with a connection.  | `GET /proof-records`             |
-| **💰 Retrieve Proof Data**            | Retrieve proof data for a specific proof record.      | `GET /proof-data/:proofRecordId` |
+### Frontend
 
----
-
-## **GET /wallet-dids**
-
-**🔍 Description:** Retrieve the DIDs associated with the user's wallet.  
-**📂 Query Parameters:**
-
-- `method`: The method to use for fetching DIDs.
-
-**📥 Response:** Returns a list of DIDs. ✅
+```bash
+cd interface
+npm install
+cp .env.sample .env.local   # set NEXT_PUBLIC_API_URL and ISSUER_CRED_DEF_ID
+npm run dev                  # http://localhost:3000
+```
 
 ---
 
-## **POST /create-invitation**
+## Open Decisions
 
-**🔍 Description:** Create an invitation for a connection.  
-**📂 Request Body:**
-
-- `label`: A label for the invitation.
-- `alias`: An alias for the invitation.
-- `domain`: The domain associated with the invitation.
-
-**📥 Response:** Returns the invitation details. 📨
+- **SSS/MPOA scheme**: who holds shares (patient / hospital / regulator)? What threshold (e.g. 2-of-3)? What triggers reconstruction — key recovery, emergency access, both?
+- **DWN encryption key management**: whose key encrypts a given record — patient's, or a per-record key wrapped by the patient's key?
+- **Migration of `interface/` → `apps/web/`**: full rewrite vs. incremental port (recommendation: incremental — existing pages work, just repoint at new agent endpoints)
 
 ---
 
-## **GET /connections**
+## Known Constraints
 
-**🔍 Description:** Retrieve connection details.  
-**📂 Query Parameters:**
-
-- `connectionId`: The ID of the connection.
-- `outOfBandId`: The out-of-band ID for the connection.
-
-**📥 Response:** Returns connection details. 🔗
+- `demo/credo/.env` has live MongoDB credentials committed to git — rotate before touching that file again
+- Doctor and pharmacist agents in the old PoC shared the same DID/seed — new `agents/` build gives each agent its own DID
+- No test framework exists in the legacy PoC — the new build should introduce one
 
 ---
 
-## **POST /create-schema**
+## Context File
 
-**🔍 Description:** Create a new schema for credentials.  
-**📂 Request Body:**
-
-- `did`: The DID of the issuer.
-- `name`: The name of the schema.
-- `version`: The version of the schema.
-- `attributes`: An array of attributes for the schema.
-
-**📥 Response:** Returns the created schema details. 📋
-
----
-
-## **GET /schemas**
-
-**🔍 Description:** Retrieve schema details.  
-**📂 Query Parameters:**
-
-- `schemaId`: The ID of the schema to retrieve.
-
-**📥 Response:** Returns the schema details. 🗃️
-
----
-
-## **POST /credential-definition**
-
-**🔍 Description:** Create a new credential definition.  
-**📂 Request Body:**
-
-- `did`: The DID of the issuer.
-- `schemaId`: The ID of the schema.
-- `tag`: A tag for the credential definition.
-
-**📥 Response:** Returns the created credential definition details. 🛠️
-
----
-
-## **GET /credential-definitions**
-
-**🔍 Description:** Retrieve credential definition details.  
-**📂 Query Parameters:**
-
-- `credentialDefinitionId`: The ID of the credential definition.
-
-**📥 Response:** Returns the credential definition details. 🏷️
-
----
-
-## **POST /issue-credential**
-
-**🔍 Description:** Issue a new credential to a connection.  
-**📂 Request Body:**
-
-- `connectionId`: The ID of the connection.
-- `name`: The name of the credential holder.
-- `email`: The email of the credential holder.
-- `age`: The age of the credential holder.
-
-**📥 Response:** Returns the issued credential details. 🎓
-
----
-
-## **GET /issued-credentials**
-
-**🔍 Description:** Retrieve issued credentials.  
-**📂 Query Parameters:**
-
-- `credentialId`: The ID of the credential to retrieve.
-
-**📥 Response:** Returns the issued credential details. 🔖
-
----
-
-## **POST /send-proof-request**
-
-**🔍 Description:** Send a proof request to a connection.  
-**📂 Request Body:**
-
-- `proofRequestlabel`: A label for the proof request.
-- `connectionId`: The ID of the connection.
-- `version`: The version of the proof request.
-
-**📥 Response:** Returns the result of the proof request. 🔐
-
----
-
-## **GET /proof-records**
-
-**🔍 Description:** Retrieve proof records.  
-**📂 Query Parameters:**
-
-- `proofRecordId`: The ID of the proof record to retrieve.
-
-**📥 Response:** Returns the proof record details. 🧾
-
----
-
-## **GET /proof-data/:proofRecordId**
-
-**🔍 Description:** Retrieve proof data for a specific proof record.  
-**📂 Path Parameters:**
-
-- `proofRecordId`: The ID of the proof record.
-
-**📥 Response:** Returns the proof data. 📊
-
----
-
-## **POST /send-message**
-
-**🔍 Description:** Send a message to a connection.  
-**📂 Request Body:**
-
-- `connectionId`: The ID of the connection.
-- `message`: The message content.
-
-**📥 Response:** Returns the result of the message sending. ✉️
-
-## Conclusion
-
-By leveraging the principles of SSI, users can maintain control over their personal information while interacting securely with various services.
-
-For further information, please refer to the documentation of the underlying libraries and technologies used in this implementation.
-
-## ![cat](demo/credo/assets/cat.gif) Further reading
-
-https://github.com/animo/awesome-self-sovereign-identity
-
-## 🎯 **Contributions & Feedback**
-
-Feel free to contribute to this project! If you have any issues or suggestions, please open an issue. 🛠️🚀
-
----
-
-## 📧 Contact
-
-For questions or support, reach out to **Cryptic Consultancy Limited**! ![pistol](demo/credo/assets/pistol.png)
-- You can mail us through [contact@cryptic-consultancy.co.uk](mailto:contact@cryptic-consultancy.co.uk)
----
-
-Made with ❤️ for the SSI community by [Cryptic Consultancy Limited (CCL)](https://cryptic-consultancy.co.uk/). 
-
-CCL is a London-based startup providing research and development conslutancy services on SSI, Federated Identity and Blockchain. We have a strong track record of develivering high quality solutions for challenging problems in the intersection of SSI, Federated Identity and Blockchain.
+`CONTEXT.md` is the single source of truth for all locked decisions, the full 14-step dataflow, the module status table, build order, and open questions. Paste it at the start of any new session working on this project.

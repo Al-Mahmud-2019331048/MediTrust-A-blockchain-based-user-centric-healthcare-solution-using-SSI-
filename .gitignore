@@ -1,1 +1,26 @@
+# Dependencies
+node_modules/
+.yarn/cache
 **/.yarn/cache
+
+# Environment variables — never commit secrets
+.env
+.env.*
+!.env.sample
+
+# Database files
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+
+# Build outputs
+dist/
+build/
+.next/
+
+# Prisma generated client (regenerated via prisma generate)
+# Keep migrations/ — those are source-controlled
+
+# OS
+.DS_Store

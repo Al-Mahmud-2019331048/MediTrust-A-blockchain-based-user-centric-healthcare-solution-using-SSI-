@@ -1,0 +1,34 @@
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "lib": ["ES2020", "DOM"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
+    "jsx": "react-jsx",
+    "strict": false,
+    "skipLibCheck": true,
+    "paths": {
+      "@credo-ts/core": ["./demo/credo/node_modules/@credo-ts/core"],
+      "@credo-ts/anoncreds": ["./demo/credo/node_modules/@credo-ts/anoncreds"],
+      "@credo-ts/askar": ["./demo/credo/node_modules/@credo-ts/askar"],
+      "@credo-ts/indy-vdr": ["./demo/credo/node_modules/@credo-ts/indy-vdr"],
+      "@credo-ts/node": ["./demo/credo/node_modules/@credo-ts/node"],
+      "next": ["./interface/node_modules/next"],
+      "next/*": ["./interface/node_modules/next/*"],
+      "qrcode.react": ["./interface/node_modules/qrcode.react"],
+      "qrcode": ["./interface/node_modules/qrcode"]
+    }
+  },
+  "include": [
+    "agents/**/*",
+    "crypto/**/*",
+    "audit/**/*",
+    "dwn/**/*",
+    "bridge/**/*",
+    "benchmark/**/*",
+    "apps/web/**/*"
+  ],
+  "exclude": ["demo", "interface", "**/node_modules"]
+}

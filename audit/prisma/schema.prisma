@@ -1,0 +1,30 @@
+// Audit persistence layer — SQLite (file-based, no external server).
+// Only AuditLog lives here. DWN records and permissions are in LevelDB inside the DWN node.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = "file:./audit.db"
+}
+
+model AuditLog {
+  id           String   @id @default(cuid())
+  eventId      String   @unique
+  eventType    String
+  actorDid     String
+  targetDid    String
+  resourceId   String
+  resourceType String
+  action       String
+  metadata     String?
+  timestamp    DateTime @default(now())
+  signature    String
+
+  @@index([actorDid])
+  @@index([targetDid])
+  @@index([resourceId])
+  @@index([timestamp])
+}
