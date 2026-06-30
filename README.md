@@ -1,18 +1,119 @@
-# MediTrust — Blockchain-based Patient-Centric Healthcare SSI System
+# MediTrust — Decentralised Patient-Centric Healthcare SSI System
 
-A thesis implementation of a **decentralized, patient-centric healthcare identity system** using Self-Sovereign Identity (SSI) built on Hyperledger Indy + Credo-TS, with Decentralized Web Nodes (DWN) replacing centralized MongoDB for off-chain medical record storage.
+A thesis implementation of a **decentralised, patient-centric healthcare identity and data system** using Self-Sovereign Identity (SSI) built on Hyperledger Indy + Credo-TS, with a full Decentralised Web Node (DWN) replacing centralised storage for off-chain medical records.
 
 ---
 
 ## What This Project Is
 
-MediTrust implements the SSI trust triangle (Issuer → Holder → Verifier) in a healthcare context. Patients own their identity and medical data — no central authority stores or controls it. The system uses:
+MediTrust implements the SSI trust triangle (Issuer → Holder → Verifier) in a healthcare context. Patients own their identity and medical data — no central authority stores or controls it.
 
-- **Hyperledger Indy** (BCovrin TestNet) as the permissioned blockchain ledger for DIDs, schemas, and credential definitions
-- **Credo-TS** (Aries Framework JavaScript) as the SSI agent framework
-- **AnonCreds** for zero-knowledge proof selective disclosure
-- **DWN** (`@web5/api`) as the decentralized off-chain storage layer (replacing MongoDB from the original PoC)
-- **AES-256** encryption for medical records at rest (new — the original PoC only hashed, never encrypted)
+The original defended thesis proposed SSI + DWN but the actual PoC used MongoDB as a pragmatic stand-in. This implementation round closes that gap by building what was proposed: a full DWN node with LevelDB embedded storage, patient-controlled encrypted records, SSI-based consent via DWN Permissions + Verifiable Consent Receipt VCs on Indy, key recovery via Shamir Secret Sharing, and a full signed audit trail.
+
+**No MongoDB anywhere.** Every component is either on-chain (Indy), embedded file-based (LevelDB for DWN, SQLite for audit), or in-memory (agent caches).
+
+---
+
+## Architecture
+
+```
+Patient (Bifold Wallet — iOS/Android)
+        │
+        │ DIDComm / OOB invitation
+        ▼
+Government Agent  :4000     ← Issues Identity VC (AnonCreds on Indy)
+Doctor Agent      :4002     ← Verifies identity ZKP, issues medical VC, uploads record to DWN
+Pharmacy Agent    :4004     ← Verifies identity + prescription via DWN query
+        │
+        │ After verification — doctor uploads record to patient's DWN
+        ▼
+┌─────────────────────────────────────────────────────────────┐
+│  Full DWN Patient Node  :5000  (runs on patient's machine)  │
+│                                                             │
+│  Records Interface                                          │
+│    createRecord()  → AES-256-GCM encrypt → LevelDB         │
+│    readRecord()    → permission check → protocol filter     │
+│                      → decrypt → return                     │
+│    updateRecord()  → re-encrypt → LevelDB                   │
+│    deleteRecord()  → remove from LevelDB                    │
+│                                                             │
+│  Permissions Interface                                      │
+│    grantPermission()   → LevelDB + Consent Receipt VC       │
+│    revokePermission()  → LevelDB + Indy revoke              │
+│    checkPermission()   → LevelDB lookup                     │
+│                                                             │
+│  Protocols Interface                                        │
+│    defineProtocol()    → LevelDB                            │
+│    (MedicalRecord, Prescription, InsuranceClaim)            │
+│                                                             │
+│  Storage: LevelDB (embedded, patient's files)               │
+└──────────────────────────┬──────────────────────────────────┘
+                           │ audit event on every operation
+                           ▼
+Audit Service         ← AuditService.record() → SQLite via Prisma
+                         Signed JWT, file-based, no server
+
+SSS / MPOA Service    ← splitMEK() on patient registration
+                         3-of-5 Shamir shares + multi-party approval on recovery
+
+Hyperledger Indy      ← DIDs, VCs, Consent Receipt VCs, Revocation Registry
+(BCovrin TestNet)
+```
+
+---
+
+## Technology Stack
+
+| Layer | Technology | Notes |
+|-------|-----------|-------|
+| Runtime | Node.js ≥20 | |
+| Language | TypeScript 5 | |
+| SSI Framework | Credo-TS 0.5.x | AnonCreds, Askar wallet, IndyVdr |
+| Ledger | Hyperledger Indy (BCovrin TestNet) | DIDs, schemas, credential definitions |
+| ZKP | AnonCreds | Attribute-level selective disclosure |
+| Off-chain storage | LevelDB (embedded) | Full DWN node — no external DB server |
+| Audit storage | SQLite via Prisma | File-based, no server |
+| Record encryption | AES-256-GCM | Per-record key wrapped by patient public key |
+| Key recovery | Shamir Secret Sharing | 5 shares, any 3 reconstruct (pure JS) |
+| Consent proof | Verifiable Consent Receipt VC | Issued on Indy at permission grant |
+| Mobile wallet | Bifold | Patient holder role — iOS/Android |
+| Frontend | Next.js 15 + React 18 + Tailwind | `apps/web/` (new), `interface/` (legacy reference) |
+
+---
+
+## The 10 Required Modules
+
+| # | Module | Status |
+|---|--------|--------|
+| 1 | SSI Identity Layer — DID creation, key pairs, Indy registration | Exists in `demo/credo/` |
+| 2 | Verifiable Credential System — issue, store, verify | Exists in `demo/credo/` |
+| 3 | Digital Wallet — Bifold mobile + Credo-TS/Askar | Exists |
+| 4 | Selective Sharing — ZKP attribute-level + DWN Protocol field filtering | ZKP exists; DWN Protocol layer pending |
+| 5 | DWN Implementation — Records + Permissions + Protocols, LevelDB | Not built |
+| 6 | Encryption Layer — AES-256-GCM + key wrapping | Written, not wired |
+| 7 | MPOA + SSS Key Recovery — 5 shares, threshold 3 | Not built |
+| 8 | Consent Management — DWN Permissions + Consent Receipt VC | Not built (folded into Module 5) |
+| 9 | Audit Trail — persistent SQLite, signed, every DWN operation | **Complete** |
+| 10 | Security Evaluation — 8 experiments, metrics table | Not built |
+
+---
+
+## 20-Day Build Order
+
+| Day | Module | Status |
+|-----|--------|--------|
+| ~~1–2~~ | ~~Audit Trail → SQLite (Module 9)~~ | **Done** |
+| 3–4 | SSS + MPOA Key Recovery (Module 7) | Next |
+| 5–6 | DWN Storage + Encryption | Pending |
+| 7–8 | DWN Records Interface (Module 5) | Pending |
+| 9–10 | DWN Permissions Interface (Module 8) | Pending |
+| 11–12 | DWN Protocols Interface (Module 4) | Pending |
+| 13 | DWN server.ts + package.json | Pending |
+| 14–15 | Per-agent server.ts entry points | Pending |
+| 16–17 | Wire agents → DWN | Pending |
+| 18 | Benchmark — all 8 experiments (Module 10) | Pending |
+| 19 | End-to-end testing | Pending |
+| 20 | Documentation | Pending |
 
 ---
 
@@ -20,233 +121,82 @@ MediTrust implements the SSI trust triangle (Issuer → Holder → Verifier) in 
 
 ```
 .
-├── CONTEXT.md                   — session context, locked decisions, open questions (read this first)
-├── README.md                    — this file
+├── CLAUDE.md              ← Project guide: file map, build status, constraints (read this)
+├── CONTEXT.md             ← Session context: decisions, architecture, build order
+├── README.md              ← This file
 │
-├── demo/                        — legacy PoC (Credo-TS + Express + MongoDB), kept for reference
-│   └── credo/                   — working SSI agent: server.ts, agent.ts, module.ts, network.ts
+├── agents/                ← Credo-TS + Indy SSI agent services
+│   ├── shared/            ← BaseAgent, types, module config, network config, routes
+│   ├── government-agent/  ← Issues patient identity VCs (port 4000)
+│   ├── doctor-agent/      ← Verifies identity, issues medical VCs (port 4002)
+│   └── pharmacy-agent/    ← Verifies identity + prescription (port 4004)
 │
-├── interface/                   — legacy Next.js 15 frontend portals, kept for reference
-│   └── src/app/                 — government/, doctor/, pharmacist/, patient/, verifier/ pages
+├── dwn/                   ← Decentralised Web Node (patient owns their data)
+│   └── patient-node/      ← Records + Permissions + Protocols interfaces, LevelDB
 │
-├── agents/                      — NEW: Credo-TS + Indy SSI agents (4 independent processes)
-│   ├── government-agent/        — issues patient identity credentials
-│   ├── doctor-agent/            — verifies identity, issues medical document credentials
-│   ├── pharmacy-agent/          — verifies identity + prescription, dispenses
-│   ├── healthcare-authority-agent/ — NEW: issues doctor/hospital licensing creds + revocation
-│   └── shared/                  — common Credo module/network/types config (no duplication)
-│
-├── dwn/                         — NEW: Decentralized Web Node layer (replaces MongoDB)
-│   ├── patient-node/            — patient's own DWN instance
-│   └── provider-node/           — provider's DWN instance
-│
-├── edge/                        — NEW: thin clients driving the 14-step auth+permission dataflow
-│   ├── patient-edge/
-│   └── provider-edge/
-│
-├── bridge/                      — NEW: orchestrates Credo/Indy world ↔ Web5/DWN world
-│   └── src/
-│       ├── routes/
-│       ├── services/
-│       └── coordinators/auth-flow.ts   — owns the full 14-step sequence end to end
+├── audit/                 ← Audit trail — logs every DWN operation
+│   ├── prisma/            ← SQLite schema + audit.db + migrations
+│   └── src/services/      ← AuditService: record, query, verify, sign
 │
 ├── crypto/
-│   ├── encryption/              — NEW: real AES-256 at rest
-│   └── sss/                     — NEW: Shamir Secret Sharing + multi-party key recovery (design pending)
+│   ├── encryption/        ← AES-256-GCM, SHA-256, JWT signing utilities
+│   └── sss/               ← Shamir Secret Sharing + MPOA key recovery
 │
-├── consent/                     — NEW: Verifiable Consent Receipt VC issuance (Indy-native)
-├── audit/                       — NEW: signed, structured, immutable audit log
+├── apps/web/              ← New Next.js frontend (replaces interface/ over time)
 │
-├── apps/
-│   └── web/                     — successor to interface/, ported once agents stabilize
+├── benchmark/             ← 8 experiments runner + results output
+├── infra/                 ← docker-compose.yml (last to build)
 │
-├── docs/
-│   ├── architecture/
-│   └── decisions/               — ADR-style design decision records
-│
-└── infra/                       — docker-compose.yml, boot order, shared env templates
+├── demo/credo/            ← LEGACY working PoC (keep as reference, do not delete)
+└── interface/             ← LEGACY Next.js frontend (keep as reference, do not delete)
 ```
 
 ---
 
-## What Is Already Built (Legacy PoC — `demo/` + `interface/`)
+## The 8 Required Experiments
 
-The original proof-of-concept is fully working and serves as the adaptation base for the new build.
+| Experiment | Metric | How to Measure |
+|-----------|--------|---------------|
+| VC issuance time | ms | `POST /issue-credential` → `credential-issued` state |
+| VC verification time | ms | `POST /send-proof-request` → `isVerified: true` |
+| Blockchain transaction latency | seconds | Schema/credDef registration on BCovrin |
+| DWN storage overhead | KB ratio | Encrypted record size vs plaintext size |
+| Selective sharing overhead | ms | Full retrieval vs Protocol-filtered retrieval |
+| SSS key split time | ms | `performance.now()` around `splitMEK()` |
+| SSS key recovery time | ms | `initiateRecovery` to MEK reconstructed (3 shares) |
+| Access revocation time | seconds | `POST /revoke` → query returns 403 |
 
-### Backend (`demo/credo/`)
-
-| File | Lines | Purpose |
-|------|-------|---------|
-| `server.ts` | 1799 | Express app, all route handlers, agent lifecycle, in-memory proof cache |
-| `agent.ts` | 580 | `BaseAgent` — Credo Agent wrapper, DID ops, credential issuance |
-| `document-routes.ts` | 627 | 6 document endpoints (upload, issue, verify, share, download) |
-| `document-storage.ts` | 281 | MongoDB CRUD with SHA-256 hashing + JWT signing |
-| `document-service.ts` | 211 | Service layer between routes and storage |
-| `module.ts` | 55 | Credo module assembly |
-| `network.ts` | 24 | BCovrin TestNet genesis config |
-| `agent.ts` | — | `BaseAgent` class: DID creation, credential issuance, proof requests |
-
-**Three agents run as independent Node.js processes:**
-
-| Agent | API Port | DIDComm Port |
-|-------|----------|--------------|
-| Issuer (Government) | 4000 | 4001 |
-| Doctor | 4002 | 4003 |
-| Pharmacist | 4004 | 4005 |
-
-### Frontend (`interface/`)
-
-Stack: Next.js 15 + React 18 + Tailwind CSS + `apiService.js` (centralized HTTP client)
-
-| Page | Purpose |
-|------|---------|
-| `/government` | 4-step wizard: connect → issue identity credential |
-| `/doctor` | 5-step wizard: connect → verify identity → upload document → issue credential |
-| `/pharmacist` | 4-step wizard: connect → verify identity → verify prescription → retrieve document |
-| `/patient` | Simulated wallet UI (mock data — real holder role lives in the Bifold mobile app) |
-| `/verifier` | Generic verifier stepper |
-
-### Existing Credential Flows
-
-1. **Government issues identity credential** — patient scans QR, accepts AnonCreds credential with `name`, `age`, `email`, `nationalId`, `medicalCondition`, `bloodType`, `emergencyContact`
-2. **Doctor verifies patient + issues prescription** — doctor requests ZKP proof restricted to government cred-def, then uploads document (stored in MongoDB as SHA-256 hash + JWT-signed), issues document metadata as credential to patient
-3. **Pharmacist verifies identity + prescription** — double proof-request chain, then retrieves document from MongoDB and dispenses
-
-### Known Gaps in the Legacy PoC (What This Build Closes)
-
-| Gap | Detail |
-|-----|--------|
-| Storage is centralized (MongoDB) | Directly contradicts the decentralization thesis claim |
-| No real encryption | SHA-256 hashing + JWT signing only — records were never encrypted at rest |
-| Consent is implicit | No explicit Verifiable Consent Receipt VC issued when patient grants access |
-| Audit trail is weak | Only MongoDB timestamps — no signed, structured, immutable log |
-| No revocation for provider credentials | No healthcare-authority agent to revoke doctor/hospital licenses |
-| Doctor and pharmacist shared the same DID/seed | Each new agent gets its own DID |
-
----
-
-## What We Are Implementing (New Build)
-
-All new work happens in the top-level folders (`agents/`, `dwn/`, `edge/`, `bridge/`, `crypto/`, `consent/`, `audit/`). The legacy `demo/` and `interface/` are kept as reference — not deleted, not run in parallel.
-
-### Core Architecture Change: DWN Replaces MongoDB
-
-Medical records are written to the patient's **Decentralized Web Node** (DWN) instead of a central MongoDB instance. The patient's DWN is their own data store — no provider can read it without an explicit permission grant.
-
-### The 14-Step DWN Permission + Record-Write Dataflow
-
-This is the core flow the new `dwn/`, `edge/`, and `bridge/` layers implement:
-
-1. `provider-edge` generates QR code containing provider DID
-2. `patient-edge` resolves provider DID through Indy VDR
-3. `patient-edge` retrieves patient's own DID document from local wallet
-4. `patient-edge` → `patient-node`: sends patient DID + freshly generated nonce
-5. `patient-node` → `provider-node`: forwards patient DID + nonce over HTTP
-6. `provider-node` resolves the patient DID through Indy VDR
-7. `provider-node` → `provider-edge`: sends resolved patient DID document
-8. `provider-edge` → `provider-node`: generates + sends authentication signature (provider private key)
-9. `provider-node` issues an access token to the patient node
-10. `provider-node` → `patient-node`: sends permission request
-11. `patient-node` → `patient-edge`: forwards permission request, alerts the patient
-12. `patient-edge` → `patient-node`: patient's grant/deny decision
-13. `patient-node` → `provider-node`: forwards the permission grant
-14. `provider-node` → `patient-node`: sends `RecordsWrite` message; patient node decrypts and stores
-
-`bridge/src/coordinators/auth-flow.ts` orchestrates this full sequence.
-
-### New Modules
-
-| Module | What it does | Status |
-|--------|-------------|--------|
-| `agents/healthcare-authority-agent/` | Issues doctor/hospital licensing credentials + handles revocation | Net new |
-| `agents/shared/` | Common Credo module config extracted from `demo/credo/module.ts` + `network.ts` | Net new |
-| `dwn/patient-node/` | Patient's own DWN instance; owns steps 4, 5, 10–12, 14 of the dataflow | Net new |
-| `dwn/provider-node/` | Provider's DWN instance; owns steps 5–9, 13, 14 | Net new |
-| `edge/patient-edge/` + `edge/provider-edge/` | Thin clients driving the 14-step flow | Net new |
-| `bridge/src/coordinators/auth-flow.ts` | Orchestrates the full Indy ↔ DWN auth sequence | Net new |
-| `crypto/encryption/` | Real AES-256 at rest, wired into the DWN write path | Net new |
-| `consent/` | Explicit Verifiable Consent Receipt VC (Indy-native signed credential, no smart contract) | Net new |
-| `audit/` | Signed, structured, immutable audit log | Net new |
-| `crypto/sss/` | Shamir Secret Sharing + multi-party key recovery/approval (design pending) | Net new |
-| `apps/web/` | Next.js successor to `interface/`, ported once agents stabilize | Planned |
-| `infra/docker-compose.yml` | Single-command boot of all services | Planned |
-
-### Build Order
-
-Dependencies run one direction — build in this sequence:
-
-1. `bridge/src/services/event-bus.ts` — everything else eventually publishes/subscribes through it
-2. `agents/shared/` — common config so the four agents don't each duplicate it
-3. `agents/healthcare-authority-agent/` — simplest new agent, proves the adapted pattern works
-4. `dwn/patient-node/` — start with patient-side permission flow (most thesis-relevant part)
-5. `dwn/provider-node/` — mirror of patient-node
-6. `edge/patient-edge/` + `edge/provider-edge/` — thin UIs once nodes work headless
-7. `crypto/encryption/` — wire AES-256 into the DWN write path before any real data flows
-8. `consent/` + `audit/` — attach to credential-issuance and permission-grant paths
-9. `crypto/sss/` — once recovery/approval design is settled
-10. `infra/docker-compose.yml` — last, once individual services are independently runnable
-11. `apps/web/` — port the working portal UI from `interface/` once new agents are stable
-
----
-
-## Technology Stack
-
-### Existing (Legacy PoC)
-
-| Layer | Technology | Version |
-|-------|-----------|---------|
-| Runtime | Node.js | >=20 |
-| Language | TypeScript | 5.7.2 |
-| SSI Framework | Credo-TS | 0.5.13 |
-| Web Server | Express | 4.21 |
-| Storage | MongoDB via Prisma | 5.10 |
-| Document Signing | jsonwebtoken | 9.0.2 |
-| Ledger | Hyperledger Indy (BCovrin TestNet) via indy-vdr | 0.2.2 |
-| Wallet | Aries Askar | 0.2.3 |
-| Crypto | AnonCreds | 0.2.2 |
-| Frontend | Next.js 15 + React 18 + Tailwind CSS | — |
-
-### New (This Build)
-
-| Layer | Technology |
-|-------|-----------|
-| Off-chain storage | DWN via `@web5/api` (replaces MongoDB) |
-| Record encryption | AES-256 at rest |
-| Key recovery | Shamir Secret Sharing (`shamirs-secret-sharing` or equivalent) |
-| Consent | Verifiable Consent Receipt VC (Indy AnonCreds) |
+Results output to `benchmark/results/` as JSON + Markdown table.
 
 ---
 
 ## Running the Legacy PoC
 
+The original working demo lives in `demo/credo/` + `interface/`. It runs on MongoDB and demonstrates the full SSI flow. Keep it as reference — do not run it in parallel with the new build.
+
 ### Prerequisites
 
-- Node.js >=20
-- MongoDB instance
-- ngrok (for mobile wallet DIDComm)
-- Bifold mobile wallet (iOS/Android) — the patient holder role lives here
+- Node.js ≥20
+- ngrok (for Bifold mobile wallet DIDComm)
+- Bifold mobile wallet (iOS/Android)
 
 ### Backend
 
 ```bash
 cd demo/credo
 yarn install
-cp .env.sample .env   # fill in DIDs, seeds, MongoDB URL, ngrok endpoints
-./setup-db.sh
-npx prisma db push
-
-# Start in three separate terminals:
-yarn issuer      # http://localhost:4000 (API) + 4001 (DIDComm)
-yarn doctor      # http://localhost:4002 (API) + 4003 (DIDComm)
-yarn pharmacist  # http://localhost:4004 (API) + 4005 (DIDComm)
+cp .env.sample .env    # fill in agent seeds, ngrok endpoints
+yarn issuer            # Government agent  http://localhost:4000
+yarn doctor            # Doctor agent      http://localhost:4002
+yarn pharmacist        # Pharmacy agent    http://localhost:4004
 ```
 
-### ngrok (one tunnel per agent DIDComm port)
+### ngrok (one tunnel per DIDComm port)
 
 ```bash
-ngrok http 4001   # copy URL → ISSUER_AGENT_PUBLIC_ENDPOINT in .env
-ngrok http 4003   # copy URL → DOCTOR_AGENT_PUBLIC_ENDPOINT
-ngrok http 4005   # copy URL → PHARMACIST_AGENT_PUBLIC_ENDPOINT
+ngrok http 4001    # copy URL → ISSUER_AGENT_PUBLIC_ENDPOINT in .env
+ngrok http 4003    # copy URL → DOCTOR_AGENT_PUBLIC_ENDPOINT
+ngrok http 4005    # copy URL → PHARMACIST_AGENT_PUBLIC_ENDPOINT
 ```
 
 ### Frontend
@@ -254,28 +204,33 @@ ngrok http 4005   # copy URL → PHARMACIST_AGENT_PUBLIC_ENDPOINT
 ```bash
 cd interface
 npm install
-cp .env.sample .env.local   # set NEXT_PUBLIC_API_URL and ISSUER_CRED_DEF_ID
-npm run dev                  # http://localhost:3000
+cp .env.sample .env.local
+npm run dev        # http://localhost:3000
 ```
 
 ---
 
-## Open Decisions
+## Key Decisions (Locked)
 
-- **SSS/MPOA scheme**: who holds shares (patient / hospital / regulator)? What threshold (e.g. 2-of-3)? What triggers reconstruction — key recovery, emergency access, both?
-- **DWN encryption key management**: whose key encrypts a given record — patient's, or a per-record key wrapped by the patient's key?
-- **Migration of `interface/` → `apps/web/`**: full rewrite vs. incremental port (recommendation: incremental — existing pages work, just repoint at new agent endpoints)
+| Decision | Choice |
+|----------|--------|
+| Off-chain storage | Full DWN node (LevelDB embedded) — not MongoDB, not @web5/api |
+| Audit storage | SQLite via Prisma — file-based, no server |
+| Consent | DWN Permissions (enforcement) + Consent Receipt VC on Indy (proof) |
+| MongoDB | Removed entirely from all layers |
+| Encryption | AES-256-GCM at rest, per-record key wrapped by patient public key |
+| SSS threshold | 5 shares total, any 3 reconstruct the MEK |
+| Share holders | Patient device, Hospital, Trusted family, Backup server, Recovery agent |
+| MPOA approvals | Patient + Hospital + Trusted Authority (threshold = 3) |
+| Smart contracts | Out of scope — Indy has no VM layer |
+| Legacy PoC | Kept for reference — not deleted, not run in parallel |
 
 ---
 
 ## Known Constraints
 
-- `demo/credo/.env` has live MongoDB credentials committed to git — rotate before touching that file again
-- Doctor and pharmacist agents in the old PoC shared the same DID/seed — new `agents/` build gives each agent its own DID
-- No test framework exists in the legacy PoC — the new build should introduce one
-
----
-
-## Context File
-
-`CONTEXT.md` is the single source of truth for all locked decisions, the full 14-step dataflow, the module status table, build order, and open questions. Paste it at the start of any new session working on this project.
+- `demo/credo/.env` has live credentials committed to git — **never touch that file**
+- Each new agent must have its own DID and seed — the old PoC shared them
+- `AUDIT_SIGNING_SECRET`, `DOCUMENT_SIGNING_SECRET`, `CONSENT_SIGNING_SECRET` must be set in `.env` before any service starts
+- `audit/prisma/audit.db` is excluded from git (`.gitignore`) — regenerate with `prisma migrate dev` after cloning
+- Run `npm install` at project root after cloning — provides `dotenv` and `jsonwebtoken` for monorepo-wide resolution
