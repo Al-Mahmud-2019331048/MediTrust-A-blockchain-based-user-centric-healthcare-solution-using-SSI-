@@ -1,19 +1,25 @@
 {
   "name": "meditrust",
   "private": true,
+  "scripts": {
+    "prisma:generate": "prisma generate --schema=audit/prisma/schema.prisma",
+    "prisma:migrate": "prisma migrate dev --schema=audit/prisma/schema.prisma"
+  },
   "dependencies": {
+    "@prisma/client": "^5",
     "dotenv": "^16",
     "jsonwebtoken": "^9"
   },
   "devDependencies": {
-    "@types/node": "^20",
-    "@types/express": "^4",
     "@types/cors": "^2",
+    "@types/express": "^4",
     "@types/jsonwebtoken": "^9",
+    "@types/multer": "^1",
+    "@types/node": "^20",
+    "@types/qrcode": "^1",
     "@types/react": "^18",
     "@types/react-dom": "^18",
-    "@types/multer": "^1",
-    "@types/qrcode": "^1",
+    "prisma": "^5",
     "typescript": "^5"
   }
 }
