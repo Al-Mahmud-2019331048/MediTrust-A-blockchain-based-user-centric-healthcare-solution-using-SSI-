@@ -3,6 +3,16 @@
 > Read this file at the start of every session. Update it whenever a decision is made, a module is completed, or a constraint is discovered.
 > Implementation pace: one module at a time, over 20 days. Do NOT implement anything the user has not explicitly approved for that session.
 
+## How to Present Changes for Approval
+
+Before making any code change or asking the user to approve anything, always provide:
+
+1. **What I'm doing** — plain English description of the change, no jargon
+2. **Why** — what problem it solves or why it is needed
+3. **What files are affected** — which files are being created, modified, or deleted
+4. **What stays the same** — what is not being touched
+5. **Any risks or things to watch** — anything that could go wrong or needs attention
+
 ---
 
 ## What This Project Is
