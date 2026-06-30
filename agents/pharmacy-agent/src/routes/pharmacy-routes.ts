@@ -24,7 +24,7 @@ export function registerPharmacyRoutes(
         attributes: {
           identity_info: {
             names: ["nationalId", "name", "medicalCondition", "bloodType"],
-            restriction: governmentCredDefId ? [{ cred_def_id: governmentCredDefId }] : [],
+            restrictions: governmentCredDefId ? [{ cred_def_id: governmentCredDefId }] : [],
           },
         },
         predicates: {
@@ -32,7 +32,7 @@ export function registerPharmacyRoutes(
             name: "age",
             p_type: ">=" as const,
             p_value: 18,
-            restriction: governmentCredDefId ? [{ cred_def_id: governmentCredDefId }] : [],
+            restrictions: governmentCredDefId ? [{ cred_def_id: governmentCredDefId }] : [],
           },
         },
       });
@@ -57,13 +57,13 @@ export function registerPharmacyRoutes(
         ? {
             prescription_info: {
               names: ["documentId", "documentType", "documentHash", "patientName", "diagnosis", "prescription", "issuedBy", "issuedAt"],
-              restriction: [{ cred_def_id: doctorCredDefId }],
+              restrictions: [{ cred_def_id: doctorCredDefId }],
             },
           }
         : {
             prescription_info: {
               names: ["documentId", "documentType", "documentHash", "issuedBy", "issuedAt"],
-              restriction: [],
+              restrictions: [],
             },
           };
 

@@ -84,4 +84,31 @@ export type AuditEventType =
     | 'document_read'
     | 'consent_granted'
     | 'consent_revoked'
-    | 'access_denied';
+    | 'access_denied'
+    | 'key_split'
+    | 'key_recovery_initiated'
+    | 'key_recovery_approved'
+    | 'key_reconstructed';
+
+export interface SSSShare {
+    shareId: string;
+    shareIndex: number;
+    holder: 'patient' | 'hospital' | 'trusted_family' | 'backup_server' | 'recovery_agent';
+    shareData: string;
+}
+
+export interface MPOAApproval {
+    approverDid: string;
+    approverRole: 'patient' | 'hospital' | 'trusted_authority';
+    approvedAt: string;
+    signature: string;
+}
+
+export interface RecoveryRequest {
+    requestId: string;
+    patientDid: string;
+    initiatedAt: string;
+    expiresAt: string;
+    approvals: MPOAApproval[];
+    status: 'pending' | 'approved' | 'rejected' | 'expired';
+}

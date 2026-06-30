@@ -8,7 +8,8 @@
   "dependencies": {
     "@prisma/client": "^5",
     "dotenv": "^16",
-    "jsonwebtoken": "^9"
+    "jsonwebtoken": "^9",
+    "shamir-secret-sharing": "^0.0.4"
   },
   "devDependencies": {
     "@types/cors": "^2",

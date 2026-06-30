@@ -5,13 +5,15 @@
 
 ## How to Present Changes for Approval
 
-Before making any code change or asking the user to approve anything, always provide:
+Before making any code change, file edit, or running any Bash command that changes something (installs, deletes, commits, pushes, generates, migrates), always provide:
 
 1. **What I'm doing** — plain English description of the change, no jargon
 2. **Why** — what problem it solves or why it is needed
 3. **What files are affected** — which files are being created, modified, or deleted
 4. **What stays the same** — what is not being touched
 5. **Any risks or things to watch** — anything that could go wrong or needs attention
+
+**Exception:** Read-only commands (`git status`, `git log`, `ls`, `tsc --noEmit`, `git diff`) look at things and change nothing — no approval needed for these.
 
 ---
 
