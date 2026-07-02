@@ -99,7 +99,7 @@ export interface SSSShare {
 
 export interface MPOAApproval {
     approverDid: string;
-    approverRole: 'patient' | 'hospital' | 'trusted_authority';
+    approverRole: 'patient' | 'hospital' | 'guardian';
     approvedAt: string;
     signature: string;
 }
@@ -111,4 +111,41 @@ export interface RecoveryRequest {
     expiresAt: string;
     approvals: MPOAApproval[];
     status: 'pending' | 'approved' | 'rejected' | 'expired';
+}
+
+export interface EncryptedPayload {
+    encryptedData: string;
+    encryptedKey: string;
+    iv: string;
+    tag: string;
+}
+
+export interface DWNRecord extends EncryptedPayload {
+    recordId: string;
+    patientDID: string;
+    recordType: 'medical' | 'prescription' | 'lab_report';
+    protocol: string;
+    contentType: 'application/json' | 'application/pdf' | 'image/jpeg' | 'image/png';
+    fileName: string | null;
+    fileSize: number;
+    hash: string;
+    // Placeholder until Days 16-17 wire in real on-chain Indy VC issuance via the doctor agent.
+    integrityVCId: string;
+    createdAt: string;
+    updatedAt: string;
+}
+
+export interface Permission {
+    permissionId: string;
+    patientDID: string;
+    grantedToDID: string;
+    recordType: DWNRecord['recordType'];
+    allowedFields: string[];
+    purpose: string;
+    grantedAt: string;
+    expiresAt: string | null;
+    revokedAt: string | null;
+    // Real signConsentReceipt() JWT — off-chain but cryptographically real.
+    // On-chain anchoring on Indy deferred to Days 16-17, same as DWNRecord.integrityVCId.
+    consentVCId: string;
 }

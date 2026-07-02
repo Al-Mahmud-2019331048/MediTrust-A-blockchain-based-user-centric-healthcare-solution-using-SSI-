@@ -24,3 +24,6 @@ build/
 
 # OS
 .DS_Store
+
+# LevelDB data (DWN patient node)
+dwn/patient-node/data/
