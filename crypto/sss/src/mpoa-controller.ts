@@ -5,7 +5,7 @@ import { MPOAApproval, RecoveryRequest } from '../../../agents/shared/types';
 const REQUIRED_APPROVER_ROLES: MPOAApproval['approverRole'][] = [
   'patient',
   'hospital',
-  'trusted_authority',
+  'guardian',
 ];
 
 const EXPIRY_HOURS = 24;
@@ -54,6 +54,15 @@ export function approveRecovery(
   const request = recoveryRequests.get(requestId);
 
   if (!request) throw new Error(`Recovery request ${requestId} not found`);
+  // approverRole arrives over HTTP as a plain string — TypeScript's union type
+  // only guards compile-time callers, not a raw JSON body. Reject anything
+  // outside the real role set before it can be silently stored as a
+  // structurally-useless approval that can never contribute to the threshold.
+  if (!REQUIRED_APPROVER_ROLES.includes(approverRole)) {
+    throw new Error(
+      `Invalid approverRole '${approverRole}' — must be one of: ${REQUIRED_APPROVER_ROLES.join(', ')}`
+    );
+  }
   if (isExpired(request)) {
     request.status = 'expired';
     recoveryRequests.set(requestId, request);
