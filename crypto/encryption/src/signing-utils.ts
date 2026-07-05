@@ -7,9 +7,10 @@ dotenv.config();
 const DOCUMENT_SIGNING_SECRET = process.env.DOCUMENT_SIGNING_SECRET;
 const AUDIT_SIGNING_SECRET = process.env.AUDIT_SIGNING_SECRET;
 const CONSENT_SIGNING_SECRET = process.env.CONSENT_SIGNING_SECRET;
+const VP_SIGNING_SECRET = process.env.VP_SIGNING_SECRET;
 
-if (!DOCUMENT_SIGNING_SECRET || !AUDIT_SIGNING_SECRET || !CONSENT_SIGNING_SECRET) {
-  console.warn('⚠️  One or more signing secrets are not set in environment variables. Set DOCUMENT_SIGNING_SECRET, AUDIT_SIGNING_SECRET, CONSENT_SIGNING_SECRET.');
+if (!DOCUMENT_SIGNING_SECRET || !AUDIT_SIGNING_SECRET || !CONSENT_SIGNING_SECRET || !VP_SIGNING_SECRET) {
+  console.warn('⚠️  One or more signing secrets are not set in environment variables. Set DOCUMENT_SIGNING_SECRET, AUDIT_SIGNING_SECRET, CONSENT_SIGNING_SECRET, VP_SIGNING_SECRET.');
 }
 
 export function signDocumentMetadata(payload: Record<string, unknown>): string {
@@ -40,4 +41,14 @@ export function signConsentReceipt(payload: Record<string, unknown>): string {
 export function verifyConsentSignature(token: string): Record<string, unknown> {
   if (!CONSENT_SIGNING_SECRET) throw new Error('CONSENT_SIGNING_SECRET is not set');
   return jwt.verify(token, CONSENT_SIGNING_SECRET) as Record<string, unknown>;
+}
+
+export function signVerifiablePresentation(payload: Record<string, unknown>): string {
+  if (!VP_SIGNING_SECRET) throw new Error('VP_SIGNING_SECRET is not set');
+  return jwt.sign(payload, VP_SIGNING_SECRET, { expiresIn: '10y' });
+}
+
+export function verifyVerifiablePresentation(token: string): Record<string, unknown> {
+  if (!VP_SIGNING_SECRET) throw new Error('VP_SIGNING_SECRET is not set');
+  return jwt.verify(token, VP_SIGNING_SECRET) as Record<string, unknown>;
 }

@@ -2,6 +2,7 @@ import { LevelDBAdapter } from '../storage/leveldb';
 import { generateId } from '../../../../crypto/encryption/src/hash-utils';
 import { signConsentReceipt } from '../../../../crypto/encryption/src/signing-utils';
 import { Permission, DWNRecord } from '../../../../agents/shared/types';
+import { verifyActorRoleProof } from './role-verification';
 
 const PERMISSION_KEY_PREFIX = 'permission:';
 
@@ -11,9 +12,23 @@ export interface GrantPermissionInput {
   recordType: DWNRecord['recordType'];
   purpose: string;
   expiresAt?: string | null;
-  // Reserved for the Protocols interface (Days 11-12) to enforce; stored but
-  // not consulted for redaction this session.
+  // Enforced by the Protocols interface (Days 11-12) — empty/unset means
+  // unrestricted (full record visible), a non-empty list redacts reads to
+  // just those fields. See ProtocolsInterface.applyFieldFilter.
   allowedFields?: string[];
+  // actorRole is only trusted when accompanied by roleProofRecordId — a
+  // completed, verified AnonCreds proof (via an agent's existing
+  // sendProofRequest/getProofData flow) that grantedToDID holds a
+  // ProfessionalRoleCredential with this role. Supplying actorRole without
+  // roleProofRecordId is rejected; a role/proof mismatch or an unverified
+  // proof is also rejected — this is a real credential-backed claim, not a
+  // self-reported string.
+  actorRole?: string;
+  roleProofRecordId?: string;
+  // Which agent's /proof-data/:id endpoint to check roleProofRecordId
+  // against. Falls back to VERIFIER_AGENT_BASE_URL if not provided —
+  // different roles may be verified by different agents.
+  verifierAgentBaseUrl?: string;
 }
 
 export interface RevokePermissionInput {
@@ -83,6 +98,20 @@ export class PermissionsInterface {
     if (!input.recordType) throw new Error('recordType is required');
     if (!input.purpose) throw new Error('purpose is required');
 
+    if (input.actorRole) {
+      if (!input.roleProofRecordId) {
+        throw new Error('actorRole requires an accompanying roleProofRecordId');
+      }
+      const verified = await verifyActorRoleProof({
+        proofRecordId: input.roleProofRecordId,
+        expectedRole: input.actorRole,
+        verifierAgentBaseUrl: input.verifierAgentBaseUrl,
+      });
+      if (!verified) {
+        throw new Error('Role proof verification failed: proof is not verified, or its revealed role does not match actorRole');
+      }
+    }
+
     const permissionId = generateId();
     const now = new Date().toISOString();
     const expiresAt = input.expiresAt ?? null;
@@ -108,6 +137,8 @@ export class PermissionsInterface {
       expiresAt,
       revokedAt: null,
       consentVCId,
+      actorRole: input.actorRole,
+      roleProofRecordId: input.roleProofRecordId,
     };
 
     await LevelDBAdapter.put(PERMISSION_KEY_PREFIX + permissionId, JSON.stringify(permission));

@@ -1,4 +1,4 @@
-import { AnonCredsRequestedAttribute, AnonCredsRequestedPredicate } from "@credo-ts/anoncreds";
+import { AnonCredsRequestedAttribute, AnonCredsRequestedPredicate, AnonCredsProof } from "@credo-ts/anoncreds";
 
 export type CreateInvitationOptions = {
     label?: string;
@@ -88,7 +88,10 @@ export type AuditEventType =
     | 'key_split'
     | 'key_recovery_initiated'
     | 'key_recovery_approved'
-    | 'key_reconstructed';
+    | 'key_reconstructed'
+    | 'protocol_registered'
+    | 'protocol_updated'
+    | 'vp_generated';
 
 export interface SSSShare {
     shareId: string;
@@ -148,4 +151,52 @@ export interface Permission {
     // Real signConsentReceipt() JWT — off-chain but cryptographically real.
     // On-chain anchoring on Indy deferred to Days 16-17, same as DWNRecord.integrityVCId.
     consentVCId: string;
+    // Role-based Protocol enforcement (Days 11-12). actorRole is only trusted when backed by
+    // roleProofRecordId — a verified AnonCreds proof (via an agent's existing sendProofRequest/
+    // getProofData flow) that the grantedToDID holds a ProfessionalRoleCredential with this role.
+    // grantPermission() rejects actorRole supplied without a roleProofRecordId.
+    actorRole?: string;
+    roleProofRecordId?: string;
+}
+
+// DWN Protocols Interface (Days 11-12) — attribute-level field rules per actor role.
+// Stored under LevelDB key `protocol:{name}` — one row per protocol name (CLAUDE.md's
+// documented 1:1 examples: MedicalRecord/doctor, Prescription/pharmacist, InsuranceClaim/insurer).
+export interface Protocol {
+    name: string;              // "MedicalRecord" | "Prescription" | "InsuranceClaim"
+    actorRole: string;         // "doctor" | "pharmacist" | "insurer"
+    allowedFields: string[];
+    createdAt: string;
+    updatedAt: string;
+}
+
+// Minimal shape verifyActorRoleProof() expects back from an agent's GET /proof-data/:id
+// endpoint — matches what agents/shared/verifier-routes.ts already returns.
+export interface ProofDataResponse {
+    isVerified: boolean;
+    presentation?: {
+        anoncreds?: AnonCredsProof;
+    };
+}
+
+// W3C Verifiable Presentation generated from an AnonCreds ZKP proof record (Days 11-12).
+// JWT-based (not a JSON-LD/LD-Proof VP), consistent with this repo's existing JWT-only
+// signing convention (crypto/encryption/src/signing-utils.ts). The JWT signature itself is
+// the "proof" for now — real patient-DID-based signing deferred until patient wallet/DID
+// work lands, same placeholder treatment as Permission.consentVCId.
+export interface VerifiablePresentation {
+    '@context': string[];
+    type: string[];
+    holder: string;
+    verifiableCredential: Array<{
+        '@context': string[];
+        type: string[];
+        credentialSubject: Record<string, string>;
+        proof: {
+            type: 'AnonCredsZKP';
+            anoncredsProof: AnonCredsProof;
+            identifiers: AnonCredsProof['identifiers'];
+        };
+    }>;
+    issuanceDate: string;
 }

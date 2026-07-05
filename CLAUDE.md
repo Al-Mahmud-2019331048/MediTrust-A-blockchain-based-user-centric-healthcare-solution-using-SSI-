@@ -35,33 +35,42 @@ The legacy PoC (`demo/credo/` + `interface/`) is kept as reference. All new work
 
 ## The 10 Required PoC Modules
 
-| #   | Module                                | What It Proves                                                | Status                                                   |
-| --- | ------------------------------------- | ------------------------------------------------------------- | -------------------------------------------------------- |
-| 1   | SSI Identity Layer                    | DID creation, key pairs, DID registration on Indy ledger      | Exists in `demo/credo/`                                  |
-| 2   | Verifiable Credential System          | Hospital issues VC, patient stores in Bifold, doctor verifies | Exists in `demo/credo/`                                  |
-| 3   | Digital Wallet                        | Simple wallet API, encrypted local credential storage         | Bifold handles this; agent wallet via Credo-TS/Askar     |
-| 4   | Selective Sharing (Core Contribution) | Attribute-level ZKP disclosure + DWN Protocol field filtering | ZKP exists via AnonCreds; DWN Protocol layer to be built |
-| 5   | DWN Implementation                    | Records + Permissions + Protocols interfaces, LevelDB storage | **NOT BUILT**                                            |
-| 6   | Encryption Layer                      | AES-256-GCM encrypt before DWN store, key wrapping            | Utilities written, not wired                             |
-| 7   | MPOA + SSS Key Recovery               | Split MEK (5,3), multi-party approval for recovery            | **NOT BUILT**                                            |
-| 8   | Consent Management                    | DWN Permissions + Verifiable Consent Receipt VC on Indy       | **NOT BUILT** (folded into Module 5)                     |
-| 9   | Audit Trail                           | Log every DWN operation, persistent, signed                   | Written but in-memory only                               |
-| 10  | Security Evaluation                   | Run 8 experiments, produce metrics table                      | **NOT BUILT**                                            |
+| #   | Module                                | What It Proves                                                                              | Status                                                                      |
+| --- | ------------------------------------- | ------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
+| 1   | SSI Identity Layer                    | DID creation, key pairs, DID registration on Indy ledger                                    | Exists in `demo/credo/`                                                     |
+| 2   | Verifiable Credential System          | Hospital issues VC, patient stores in Bifold, doctor verifies                               | Exists in `demo/credo/`                                                     |
+| 3   | Digital Wallet                        | Simple wallet API, encrypted local credential storage (Askar at rest)                      | Bifold handles this; agent wallet via Credo-TS/Askar                        |
+| 4   | Selective Sharing (Core Contribution) | Attribute-level ZKP disclosure + DWN Protocol field filtering + W3C VP generation          | **Done** (Days 11–12) — Protocol field filtering enforced on reads; W3C VP (JWT-based) generated from AnonCreds proof records |
+| 5   | DWN Implementation                    | Records + Permissions + Protocols interfaces, LevelDB storage, hash anchored on Indy       | Storage + Records + Permissions + Protocols **Done** (Days 5–12); on-chain anchoring is a placeholder until Days 16–17 |
+| 6   | Encryption Layer                      | AES-256-GCM encrypt before DWN store, key wrapping                                         | **Done** — `dwn/patient-node/src/encryption/aes-service.ts` (Days 5–6); key-wrap uses placeholder KEK until patient wallet/DID exists |
+| 7   | MPOA + SSS Key Recovery               | Split MEK (5,3), guardian approval flow, reconstruct from threshold                        | **Done** — `crypto/sss/src/`                                                |
+| 8   | Consent Management                    | DWN Permissions (enforcement) + Verifiable Consent Receipt VC on Indy (on-chain proof)     | **Done** (folded into Module 5) — Days 9–10; consent receipt is a real signed JWT, on-chain anchoring deferred to Days 16–17 |
+| 9   | Audit Trail                           | Log every DWN operation, persistent, signed — SQLite primary + selective Indy VC anchoring | **Done** (SQLite); on-chain anchoring for high-significance events Day 16–17 |
+| 10  | Security Evaluation                   | Run 8 experiments + attack simulations, produce metrics table                               | **NOT BUILT** — Day 18                                                      |
 
 ---
 
 ## The 8 Required Experiments
 
-| Experiment                     | Metric   | How to Measure                                       |
-| ------------------------------ | -------- | ---------------------------------------------------- |
-| VC issuance time               | ms       | `POST /issue-credential` → `credential-issued` state |
-| VC verification time           | ms       | `POST /send-proof-request` → `isVerified: true`      |
-| Blockchain transaction latency | seconds  | Schema/credDef registration on BCovrin               |
-| DWN storage overhead           | KB ratio | Encrypted record size vs plaintext size              |
-| Selective sharing overhead     | ms       | Full retrieval vs Protocol-filtered retrieval        |
-| SSS split time                 | ms       | `performance.now()` around `splitMEK()`              |
-| SSS recovery time              | ms       | `initiateRecovery` to MEK reconstructed (3 shares)   |
-| Access revocation time         | seconds  | `POST /revoke` → query returns 403                   |
+| Experiment                     | Metric   | How to Measure                                                          |
+| ------------------------------ | -------- | ----------------------------------------------------------------------- |
+| VC issuance time               | ms       | `POST /issue-credential` → `credential-issued` state                    |
+| VC verification time           | ms       | `POST /send-proof-request` → `isVerified: true`                         |
+| Blockchain transaction latency | seconds  | Schema/credDef registration on BCovrin                                  |
+| DWN storage overhead           | KB/MB    | Encrypted record size vs plaintext size ratio                           |
+| Selective sharing overhead     | ms       | Full record retrieval vs Protocol-filtered retrieval                    |
+| SSS recovery time              | ms       | `initiateRecovery` to MEK reconstructed (3 shares) — already captured  |
+| Key recovery success rate      | %        | N runs with valid threshold → pass; N runs with <3 shares → correct fail |
+| Access revocation time         | seconds  | `DELETE /revokeAccess` → subsequent read returns 403                    |
+
+**Bonus metric** (already built): SSS split time (ms) via `splitTimeMs` in `splitMEK()`.
+
+**Attack simulation scenarios** (Day 18 benchmark — 5 scripted cases):
+1. Read record without a permission grant → expect 403
+2. SSS reconstruction with only 2 shares → expect thrown error
+3. MPOA recovery attempt before all 3 approvals → expect 403
+4. Expired MPOA request reconstruction attempt → expect 403 (status auto-set to `'expired'`)
+5. Tampered audit entry verification → `AuditService.verify()` returns `false`
 
 Results go in `benchmark/results/` as JSON + Markdown table.
 
@@ -77,19 +86,25 @@ Results go in `benchmark/results/` as JSON + Markdown table.
 | Consent                 | DWN Permissions interface (enforcement) + Consent Receipt VC on Indy (proof)                 |
 | MongoDB                 | **Removed entirely** — no MongoDB anywhere in the system                                     |
 | SSI layer               | Keep Hyperledger Indy + Credo-TS                                                             |
-| Encryption              | AES-256-GCM at rest + per-record key wrapped by patient public key                           |
+| Encryption              | AES-256-GCM at rest + per-record key wrapped by patient public key (placeholder KEK for now — see Known Constraints) |
 | SSS threshold           | 5 shares total, any 3 reconstruct the MEK                                                    |
 | SSS share holders       | Share 1: patient device, 2: hospital, 3: trusted family, 4: backup server, 5: recovery agent |
-| MPOA approvals required | Patient + Hospital + Trusted Authority (threshold = 3)                                       |
+| MPOA approvals required | Patient + Hospital + Guardian (threshold = 3) — `approverRole: 'patient' \| 'hospital' \| 'guardian'` |
 | Smart contracts         | Out of scope — Indy has no VM layer                                                          |
 | Legacy PoC              | Keep for reference, don't delete or run in parallel                                          |
 | SSS library             | `shamir-secret-sharing` npm package (pure JS, GF(2^8))                                       |
+| DWN URL (agents → DWN) | `PATIENT_DWN_URL=http://localhost:5000` env var in each agent — PoC runs fully local, all services on one machine, no discovery mechanism needed |
+| Hospital role in PoC   | Doctor agent (port 4002) is the hospital's clinical representative. Hospital also participates as MPOA approver (`approverRole: 'hospital'`) and SSS share holder (share 2) — both via API calls, no separate hospital server |
+| Protocol role binding    | `Permission.actorRole` is only trusted when backed by `roleProofRecordId` — a verified AnonCreds proof (existing agent proof-request flow) that the grantedToDID holds a `ProfessionalRoleCredential` (attributes: `role`, `licenseId`, `issuedAt`). No bare self-reported role string is accepted. |
+| VP format                | JWT-based W3C Verifiable Presentation (not JSON-LD/LD-Proof), consistent with this repo's JWT-only signing convention. Signed server-side with `VP_SIGNING_SECRET` — real patient-DID-based signing deferred until patient wallet/DID work lands. |
 
 ---
 
 ## Open Decisions
 
-**VP output wiring** — AnonCreds proof requests already do ZKP selective disclosure; decide before building module 4 whether to serialize a W3C Verifiable Presentation or treat the AnonCreds proof record as sufficient.
+**VP output wiring — RESOLVED and BUILT (Days 11–12):** A W3C Verifiable Presentation is generated from the AnonCreds proof record via `ProtocolsInterface.generateVerifiablePresentation()`, signed as a JWT via `signVerifiablePresentation()`.
+
+**Protocol role binding — RESOLVED and BUILT (Days 11–12):** Role claims are backed by a verified AnonCreds proof (`roleProofRecordId`) rather than a self-reported string, checked via `verifyActorRoleProof()` against an agent's existing `GET /proof-data/:id` endpoint. The `ProfessionalRoleCredential` schema itself is not yet registered on-chain — that's an operational step blocked on Days 14–15 (agent server.ts) existing; see Known Constraints.
 
 ---
 
@@ -165,27 +180,56 @@ demo/credo/                        ← LEGACY working agent system (keep as refe
 
 ```
 dwn/                               ← Decentralized Web Node — patient owns their data
-  patient-node/                    ← Patient's DWN node (port 5000) — NOT BUILT YET
+  patient-node/                    ← Patient's DWN node (port 5000) — storage + encryption + Records + Permissions + Protocols Done
     src/
       interfaces/
-        records.ts                 ← Records interface: createRecord, readRecord, updateRecord, deleteRecord
-        permissions.ts             ← Permissions interface: grantPermission, revokePermission, checkPermission
-                                      grantPermission() also issues Consent Receipt VC on Indy
-        protocols.ts               ← Protocols interface: attribute-level field rules per actor role
+        records.ts                 ← Done — RecordsInterface: createRecord, readRecord, queryRecords, decryptRecord
+                                      createRecord() computes a real SHA-256 hash; integrityVCId is a
+                                      local placeholder string until Days 16–17 wire in real on-chain Indy VC issuance
+                                      decryptRecord() (Days 9–10) unwraps + decrypts; keeps the placeholder KEK private to this file
+                                      updateRecord/deleteRecord deferred — not in CLAUDE.md's canonical required-functions list
+        permissions.ts             ← Done — PermissionsInterface: grantPermission, revokePermission, checkPermission, listPermissions
+                                      grantPermission() issues a real signConsentReceipt() JWT as consentVCId — on-chain
+                                      Indy anchoring deferred to Days 16–17, same treatment as integrityVCId
+                                      revokePermission() accepts a permissionId or a {patientDID,grantedToDID,recordType}
+                                      triple (revokes all active matches); checkPermission has NO self-read exemption —
+                                      that lives only in record-routes.ts's queryRecord handler
+                                      (Days 11–12) grantPermission() now also requires roleProofRecordId whenever
+                                      actorRole is supplied, verified via verifyActorRoleProof() before the grant is stored
+        protocols.ts                ← Done (Days 11–12) — ProtocolsInterface: defineProtocol, getProtocol, listProtocols,
+                                      applyFieldFilter (pure field-redaction helper, empty allowedFields = unrestricted);
+                                      also generateVerifiablePresentation() — builds + signs a JWT-based W3C VP from an
+                                      AnonCreds proof record's revealed attributes. Keyed by protocol:{name} (one row per
+                                      name, matching CLAUDE.md's 1:1 examples), not per name+role
+        role-verification.ts        ← Done (Days 11–12) — verifyActorRoleProof(): plain HTTP GET to an agent's existing
+                                      GET /proof-data/:id, confirms isVerified + the revealed "role" attribute matches
+                                      the claimed actorRole. Real logic, but only exercised against a mock server this
+                                      session — no agent has a running HTTP server until Days 14–15
       storage/
-        leveldb.ts                 ← LevelDB adapter: get, put, del, scan (all interfaces use this)
+        leveldb.ts                 ← Done — LevelDBAdapter: get, put, del, scan, close (all future interfaces use this)
       encryption/
-        aes-service.ts             ← AES-256-GCM encrypt/decrypt + key wrapping (patient public key)
+        aes-service.ts             ← Done — AES-256-GCM encrypt/decrypt + wrapKey/unwrapKey (placeholder KEK)
       routes/
-        record-routes.ts           ← Express: /dwn/records/*
-        permission-routes.ts       ← Express: /dwn/permissions/*
-        protocol-routes.ts         ← Express: /dwn/protocols/*
-    server.ts                      ← Express entry point, mounts all routes
-    package.json + tsconfig.json
+        record-routes.ts           ← Done — Express: POST /storeRecord, GET /queryRecord (mounted at /dwn/* by server.ts, Day 13)
+                                      queryRecord now enforces permission checks (Days 9–10): requesterDID required,
+                                      patient's own reads always allowed, others need an active grant (403 on single-record
+                                      denial, silently excluded on list queries); authorized records are decrypted,
+                                      accessPolicy is real (DID-keyed, not role-keyed — no role registry exists)
+                                      (Days 11–12) non-self authorized reads now get field-level redaction applied —
+                                      Permission.allowedFields intersected with a matching Protocol.allowedFields
+                                      (by record.protocol + the permission's actorRole) via ProtocolsInterface.applyFieldFilter
+        permission-routes.ts       ← Done — Express: POST /shareRecord, DELETE /revokeAccess (mounted at /dwn/* by server.ts, Day 13)
+                                      (Days 11–12) shareRecord accepts actorRole/roleProofRecordId/verifierAgentBaseUrl;
+                                      400 if actorRole given without roleProofRecordId, 403 if role-proof verification fails
+        protocol-routes.ts         ← Done (Days 11–12) — Express: POST /dwn/protocols/define, GET /dwn/protocols/query,
+                                      POST /dwn/protocols/generate-vp (mounted at /dwn/protocols/* by server.ts, Day 13)
+    server.ts                      ← Express entry point, mounts all routes — NOT BUILT
+    tsconfig.json                  ← Done, extends root — no separate package.json needed
 
 audit/                             ← Audit trail — logs every DWN operation
-  src/services/audit-service.ts    ← AuditService: record(), getByActor(), verify() — IN-MEMORY ONLY (needs SQLite)
-  prisma/schema.prisma             ← AuditLog model only (SQLite provider — needs update from mongodb)
+  src/services/audit-service.ts    ← AuditService: record(), getByActor(), verify(), toCredentialAttributes() — SQLite via Prisma
+                                      toCredentialAttributes() formats any event for on-chain VC issuance (used Day 16–17)
+  prisma/schema.prisma             ← AuditLog model (SQLite provider, 4 indexes — Done)
 ```
 
 ---
@@ -196,13 +240,13 @@ audit/                             ← Audit trail — logs every DWN operation
 crypto/
   encryption/src/                  ← Hashing + signing utilities (written, not wired yet)
     hash-utils.ts                  ← sha256(), verifyHash(), generateId()
-    signing-utils.ts               ← JWT signing: document / audit / consent (3 separate secrets)
+    signing-utils.ts               ← JWT signing: document / audit / consent / VP (4 separate secrets — VP added Days 11–12)
     verify-utils.ts                ← verifyDocumentIntegrity() — hash + signature + content check
 
-  sss/src/                         ← Shamir Secret Sharing + MPOA — NOT BUILT YET
-    key-splitter.ts                ← splitMEK(mek, n=5, k=3) → 5 shares
-    key-reconstructor.ts           ← reconstructKey(shares[]) → original MEK
-    mpoa-controller.ts             ← Multi-party approval: initiate, approve, release key
+  sss/src/                         ← Shamir Secret Sharing + MPOA — Done
+    key-splitter.ts                ← splitMEK(mek, n=5, k=3) → 5 shares + splitTimeMs
+    key-reconstructor.ts           ← reconstructKey(shares[]) → original MEK + reconstructTimeMs
+    mpoa-controller.ts             ← Multi-party approval: patient + hospital + guardian threshold
     routes/sss-routes.ts           ← REST API: /sss/split, /sss/recovery/*
 
 consent/                           ← REMOVED — consent is now the DWN Permissions interface
@@ -228,6 +272,10 @@ package.json                       ← Root package — @types/* + dotenv + json
 
 ## DWN Record Schema
 
+**Required DWN functions (from PoC requirements):**
+`createRecord()` / `storeRecord()` / `queryRecord()` / `shareRecord()` / `revokeAccess()`
+Internal names: createRecord, readRecord, grantPermission, revokePermission — HTTP routes expose the required names.
+
 ```typescript
 // Records (stored in LevelDB under key: `record:{recordId}`)
 {
@@ -235,14 +283,20 @@ package.json                       ← Root package — @types/* + dotenv + json
   patientDID: string,        // "did:indy:bcovrin:test:..."
   recordType: string,        // "medical" | "prescription" | "lab_report"
   protocol: string,          // which protocol governs this record type
+  contentType: string,       // "application/json" | "application/pdf" | "image/jpeg" | "image/png"
+  fileName: string | null,   // original filename for binary files, null for JSON records
+  fileSize: number,          // byte size of plaintext before encryption
   encryptedData: string,     // AES-256-GCM ciphertext (base64)
   encryptedKey: string,      // AES key wrapped with patient public key (base64)
   iv: string,                // GCM initialization vector (base64)
   tag: string,               // GCM auth tag (base64)
-  hash: string,              // SHA-256 of plaintext (integrity)
+  hash: string,              // SHA-256 of plaintext (integrity) — also anchored on Indy as VC
+  integrityVCId: string,     // Indy VC ID containing hash + recordId (on-chain proof)
   createdAt: string,         // ISO8601
   updatedAt: string          // ISO8601
 }
+// API read responses include a computed accessPolicy field derived from Permissions:
+// { ..record, accessPolicy: { "doctor": true, "insurance": false } }
 
 // Permissions (stored in LevelDB under key: `permission:{permissionId}`)
 {
@@ -255,14 +309,18 @@ package.json                       ← Root package — @types/* + dotenv + json
   grantedAt: string,
   expiresAt: string | null,
   revokedAt: string | null,
-  consentVCId: string        // ID of Consent Receipt VC on Indy
+  consentVCId: string,       // ID of Consent Receipt VC on Indy
+  actorRole?: string,        // "doctor" | "pharmacist" | "insurer" — only trusted alongside roleProofRecordId (Days 11-12)
+  roleProofRecordId?: string // verified AnonCreds proof backing actorRole; grantPermission() rejects actorRole without this
 }
 
-// Protocols (stored in LevelDB under key: `protocol:{name}`)
+// Protocols (stored in LevelDB under key: `protocol:{name}` — one row per name, Days 11-12)
 {
   name: string,              // "MedicalRecord" | "Prescription" | "InsuranceClaim"
   actorRole: string,         // "doctor" | "pharmacist" | "insurer"
-  allowedFields: string[]    // fields this role may read
+  allowedFields: string[],   // fields this role may read; empty = unrestricted
+  createdAt: string,
+  updatedAt: string
 }
 ```
 
@@ -279,15 +337,25 @@ package.json                       ← Root package — @types/* + dotenv + json
 | `crypto/encryption/src/`              | Done                | hash-utils, signing-utils, verify-utils — not wired in         |
 | `audit/src/services/audit-service.ts` | Done                | SQLite via Prisma — persistent, signed JWT events              |
 | `audit/prisma/schema.prisma`          | Done                | SQLite provider, AuditLog only — MongoDB types removed         |
-| `audit/package.json`                  | Done                | @prisma/client ^5, dotenv, jsonwebtoken                        |
+| `audit/package.json`                  | N/A — intentional   | Deliberately consolidated into root `package.json` — monorepo structure, no per-module package files |
 | `audit/tsconfig.json`                 | Done                | Extends root tsconfig                                          |
 | `apps/web/src/`                       | Done                | apiService, hooks, utils, 3 components — no pages yet          |
-| `crypto/sss/`                         | Not started         | Module 7 — Days 3–4                                            |
-| `dwn/patient-node/`                   | Not started         | Full DWN — Modules 5, 6, 8 — Days 5–13                         |
+| `crypto/sss/src/`                     | Done                | key-splitter, key-reconstructor, mpoa-controller, sss-routes — guardian threshold |
+| `dwn/patient-node/src/storage/leveldb.ts` | Done            | Generic LevelDBAdapter (get/put/del/scan/close) — no domain knowledge of record/permission schemas |
+| `dwn/patient-node/src/encryption/aes-service.ts` | Done     | AES-256-GCM encrypt/decrypt (Buffer + string input) + wrapKey/unwrapKey (placeholder KEK) |
+| `dwn/patient-node/tsconfig.json`      | Done                | Extends root tsconfig, mirrors `audit/tsconfig.json`            |
+| `dwn/patient-node/src/interfaces/records.ts` | Done         | createRecord/readRecord/queryRecords/decryptRecord; real SHA-256 hash; placeholder integrityVCId; update/delete deferred |
+| `dwn/patient-node/src/routes/record-routes.ts` | Done       | POST /storeRecord, GET /queryRecord; queryRecord now permission-gated + decrypts on authorized read |
+| `dwn/patient-node/src/interfaces/permissions.ts` | Done     | grantPermission/revokePermission/checkPermission/listPermissions; consentVCId is a real signConsentReceipt() JWT; actorRole now requires a verified roleProofRecordId (Days 11–12) |
+| `dwn/patient-node/src/routes/permission-routes.ts` | Done   | POST /shareRecord, DELETE /revokeAccess; shareRecord now accepts actorRole/roleProofRecordId/verifierAgentBaseUrl |
+| `dwn/patient-node/src/interfaces/protocols.ts` | Done       | ProtocolsInterface (defineProtocol/getProtocol/listProtocols/applyFieldFilter) + generateVerifiablePresentation — Days 11–12 |
+| `dwn/patient-node/src/interfaces/role-verification.ts` | Done | verifyActorRoleProof() — real logic, tested against a mock proof-data server only (no live agent yet) |
+| `dwn/patient-node/src/routes/protocol-routes.ts` | Done    | POST /dwn/protocols/define, GET /dwn/protocols/query, POST /dwn/protocols/generate-vp — Days 11–12 |
 | `consent/`                            | Removed             | Folded into DWN Permissions interface                          |
 | `benchmark/`                          | Not started         | Module 10 — Day 18                                             |
 | Per-agent `server.ts`                 | Not started         | Days 14–15                                                     |
 | `infra/docker-compose.yml`            | Not started         | Last thing to build                                            |
+| `ProfessionalRoleCredential` schema (government agent) | Not registered | Attributes fixed (`role`, `licenseId`, `issuedAt`); registration blocked on Days 14–15 (agent server.ts) |
 
 ---
 
@@ -295,20 +363,20 @@ package.json                       ← Root package — @types/* + dotenv + json
 
 Build one module per session. Do not start the next until user approves.
 
-| Day   | Module                               | Files                                                                                                                          |
-| ----- | ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------ |
-| ~~1–2~~ | ~~Audit → SQLite (Module 9)~~      | ~~Done~~ — `audit/src/services/audit-service.ts` swapped to Prisma, `audit.db` created, types clean |
-| 3–4   | SSS + MPOA (Module 7)                | `crypto/sss/src/key-splitter.ts`, `key-reconstructor.ts`, `mpoa-controller.ts`, `routes/sss-routes.ts`                         |
-| 5–6   | DWN Storage + Encryption             | `dwn/patient-node/src/storage/leveldb.ts`, `dwn/patient-node/src/encryption/aes-service.ts`                                    |
-| 7–8   | DWN Records Interface (Module 5)     | `dwn/patient-node/src/interfaces/records.ts`, `routes/record-routes.ts`                                                        |
-| 9–10  | DWN Permissions Interface (Module 8) | `dwn/patient-node/src/interfaces/permissions.ts`, `routes/permission-routes.ts` — includes Consent VC issuance on Indy         |
-| 11–12 | DWN Protocols Interface (Module 4)   | `dwn/patient-node/src/interfaces/protocols.ts`, `routes/protocol-routes.ts` — attribute-level selective sharing                |
-| 13    | DWN server.ts + package.json         | `dwn/patient-node/server.ts`, `package.json`, `tsconfig.json`                                                                  |
-| 14–15 | Agent server.ts files                | `agents/government-agent/server.ts`, `agents/doctor-agent/server.ts`, `agents/pharmacy-agent/server.ts`                        |
-| 16–17 | Wire agents → DWN                    | `agents/doctor-agent/src/routes/medical-routes.ts` — after issuing VC, call DWN createRecord. Wire permission grant into flow. |
-| 18    | Benchmark (Module 10)                | `benchmark/run-experiments.ts` — all 8 experiments                                                                             |
-| 19    | End-to-end testing                   | Full flow: DID → VC → DWN create → permission grant → selective read → revoke → audit                                          |
-| 20    | Documentation                        | README, CONTEXT.md, CLAUDE.md final update                                                                                     |
+| Day     | Module                               | Files + Gap Resolutions                                                                                                                                                               |
+| ------- | ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| ~~1–2~~ | ~~Audit → SQLite (Module 9)~~        | ~~Done~~ — `audit/src/services/audit-service.ts` swapped to Prisma, `audit.db` created, types clean                                                                                  |
+| ~~3–4~~ | ~~SSS + MPOA (Module 7)~~            | ~~Done~~ — `key-splitter.ts`, `key-reconstructor.ts`, `mpoa-controller.ts`, `sss-routes.ts`; guardian rename applied                                                                  |
+| ~~5–6~~ | ~~DWN Storage + Encryption~~          | ~~Done~~ — `leveldb.ts` (generic KV adapter), `aes-service.ts` (encrypt/decrypt accepts `Buffer` or `string`; wrapKey/unwrapKey use a placeholder KEK — see Known Constraints) |
+| ~~7–8~~ | ~~DWN Records Interface (Module 5)~~ | ~~Done~~ — `records.ts` (createRecord/readRecord/queryRecords, accepts `Buffer` or JSON string, real SHA-256 hash, placeholder `integrityVCId`), `record-routes.ts` (`POST /storeRecord`, `GET /queryRecord`, ciphertext-only reads); update/delete deferred |
+| ~~9–10~~ | ~~DWN Permissions Interface (Module 8)~~ | ~~Done~~ — `permissions.ts` (grantPermission/revokePermission/checkPermission/listPermissions, real `signConsentReceipt()` JWT as `consentVCId`), `permission-routes.ts` (`POST /shareRecord`, `DELETE /revokeAccess`); `record-routes.ts`'s `queryRecord` now enforces permission checks + decrypts on authorized read |
+| ~~11–12~~ | ~~DWN Protocols Interface (Module 4)~~ | ~~Done~~ — `protocols.ts` (defineProtocol/getProtocol/listProtocols/applyFieldFilter + generateVerifiablePresentation), `role-verification.ts` (verifyActorRoleProof), `protocol-routes.ts` (`/dwn/protocols/*`); `permissions.ts`/`record-routes.ts` wired for role-verified field redaction; `dwn/provider-node/` deleted |
+| 13      | DWN server.ts                        | `dwn/patient-node/server.ts`, `tsconfig.json` — no separate package.json needed (root package.json covers all deps)                                                                  |
+| 14–15   | Agent server.ts files                | `agents/government-agent/server.ts`, `agents/doctor-agent/server.ts`, `agents/pharmacy-agent/server.ts`                                                                              |
+| 16–17   | Wire agents → DWN                    | `agents/doctor-agent/src/routes/medical-routes.ts` — after issuing VC, call DWN createRecord; agents read `PATIENT_DWN_URL` from `.env` to call DWN HTTP API; **GAP:** call `AuditService.toCredentialAttributes()` + government agent to issue on-chain audit VC for key splits, consent grants/revocations |
+| 18      | Benchmark (Module 10)                | `benchmark/run-experiments.ts` — all 8 experiments; **GAP:** add key recovery success rate (%); add 5 attack simulation scenarios                                                     |
+| 19      | End-to-end testing                   | Full flow: DID → VC → DWN store → shareRecord → selective read → revokeAccess → audit → integrity VC verification                                                                    |
+| 20      | Documentation                        | README, CONTEXT.md, CLAUDE.md final update                                                                                                                                            |
 
 ---
 
@@ -326,12 +394,45 @@ Build one module per session. Do not start the next until user approves.
 - Each new agent must have its **own DID and seed** — the old PoC shared them (bug)
 - `apps/web/` needs `@types/node` installed for `process.env` TypeScript support
 - Signing secrets (`DOCUMENT_SIGNING_SECRET`, `AUDIT_SIGNING_SECRET`, `CONSENT_SIGNING_SECRET`) must be set in `.env` — `signing-utils.ts` throws on startup if missing
-- `shamir-secret-sharing` npm package needs to be installed for Module 7
-- `level` npm package needed for LevelDB in DWN node (Days 5–13)
+- `shamir-secret-sharing` npm package installed at root — already done
+- `level` npm package installed at root (`^10.0.0`) — done Days 5–6
+- `level@10`'s `get()` resolves to `undefined` for a missing key — it does NOT throw a `LEVEL_NOT_FOUND` error (verified by direct testing against the installed version, contradicting the initially-assumed abstract-level behavior). `LevelDBAdapter.get()` in `leveldb.ts` checks for `undefined` and returns `null`; do not reintroduce a try/catch on error code for this.
+- `dwn/patient-node/src/storage/leveldb.ts`'s data directory is resolved with `path.resolve(__dirname, ...)`, anchored to the file's own location — NOT `process.cwd()`. This was a real bug caught during Day 5–6 testing (running from a different working directory created a stray nested data folder). `DWN_DATA_DIR` env var, if set, is still resolved relative to `process.cwd()` (standard env-var-path behavior) — only the default path is cwd-independent.
 - Prisma SQLite requires `prisma generate` after schema change + no `@db.ObjectId` annotations
 - Consent management uses DWN Permissions interface + Consent Receipt VC on Indy — NOT a smart contract, NOT a separate service
 - Hyperledger Indy has NO smart contract layer — any "smart contract" requirement is fulfilled by signed VCs
 - `agents/shared/db-singleton.ts` has been deleted — do not recreate it, agents do not touch any database
+- `dwn/provider-node/` exists on disk but is not in the architecture — delete before Day 13
+- `audit/package.json` intentionally does not exist — all deps consolidated into root `package.json` (monorepo structure); do not create per-module package files
+- Doctor agent writes to patient DWN without a permission grant — doctor is the author of the clinical record; patient sovereignty is enforced at the READ layer only
+- All reads require explicit patient permission grant via `shareRecord` — read without valid grant returns 403
+- `PATIENT_DWN_URL=http://localhost:5000` must be set in each agent's `.env` — all agents call the DWN via this URL; no discovery mechanism needed for local PoC
+- `aes-service.ts`'s `wrapKey()`/`unwrapKey()` are KEK-agnostic — they accept any 32-byte key `Buffer` with no opinion on where it comes from. No patient public-key infrastructure exists yet (patient has no Credo-TS wallet/DID of their own). Real DID-derived key wrapping is deferred until patient wallet/DID work happens in a later session — until then, callers must supply a placeholder KEK.
+- `records.ts`'s `getPlaceholderKEK()` reads a 32-byte base64 key from `DWN_MASTER_KEK` in `.env` — throws with a generation one-liner if unset or wrong length, matching `signing-utils.ts`'s secret-handling style. This is the placeholder KEK consumer referenced above; do not remove until real patient-DID-derived key wrapping replaces it.
+- `DWNRecord.integrityVCId` (in `agents/shared/types/index.ts`) is a locally-generated placeholder string (`local-placeholder-{uuid}`), NOT a real on-chain Indy VC ID — no agent has a running Credo-TS wallet/HTTP server until Days 14–15, and even then VC issuance requires a DIDComm connection the wallet-less DWN patient-node doesn't have. Real on-chain issuance is deferred to Days 16–17, where the doctor agent (which does have a wallet) is expected to call back into the DWN with a real VC ID. The record's `hash` field IS a real SHA-256 of the plaintext today — only the on-chain anchor is deferred.
+- `GET /dwn/queryRecord` now decrypts and returns a `data` field (JSON-parsed for `application/json`, base64 for binary types) instead of raw ciphertext, but only for authorized reads — this was resolved in Days 9–10 (previously ciphertext-only, pending Permissions). `readRecord()`/`queryRecords()` on `RecordsInterface` themselves still return the raw `DWNRecord` unchanged (ciphertext intact) — decryption only happens via the new `RecordsInterface.decryptRecord()`, called from the route layer after a permission check passes.
+- The patient's own reads of their own records via `GET /dwn/queryRecord` always succeed, no permission grant needed (`requesterDID === patientDID` bypass, checked in the route handler). `PermissionsInterface.checkPermission()` itself has NO such exemption — it only checks stored grants. Permissions (`grantedToDID`) are for granting access to *other* parties, not the record owner.
+- `GET /dwn/queryRecord`'s `requesterDID` query param is now **required** (400 if missing) — was previously optional/audit-only. This is a small breaking change to the route's Days 7–8 contract, necessary because there's no way to evaluate the self-read exemption or a permission check without knowing who's asking.
+- `Permission.consentVCId` (in `agents/shared/types/index.ts`) is a REAL JWT from `signConsentReceipt()` (`crypto/encryption/src/signing-utils.ts`), not a bare placeholder string like `DWNRecord.integrityVCId` — genuine, independently verifiable cryptographic proof of consent exists today (off-chain). Only the "on Indy" on-chain anchoring is deferred to Days 16–17. Requires `CONSENT_SIGNING_SECRET` to be set in `.env` (already a required secret per the constraint above) — `grantPermission()` now has its first real caller.
+- The computed `accessPolicy` field in `queryRecord` responses is keyed by `grantedToDID` (a DID string), NOT by role name like CLAUDE.md's illustrative `{"doctor": true}` example — the schema has no role registry, only DIDs. This is a deliberate, documented deviation, not a schema change.
+- `DELETE /dwn/revokeAccess` is the correct verb (CLAUDE.md's Experiments table previously said `POST /revokeAccess`, contradicting the file map's `DELETE` — the Experiments table line has been corrected to match).
+- `express` was missing as a runtime dependency until Days 7–8 (only `@types/express` existed) — added to root `package.json` `dependencies`. `crypto/sss/src/routes/sss-routes.ts` could type-check but not actually run before this fix; both it and `record-routes.ts` are runnable now.
+- `updateRecord`/`deleteRecord` are not built — CLAUDE.md's own canonical "Required DWN functions" line only lists `createRecord()`/`storeRecord()`/`queryRecord()`/`shareRecord()`/`revokeAccess()`; update/delete only ever appeared in an aspirational file-map comment. Add `document_updated`/`document_deleted` to `AuditEventType` if/when they're actually built.
+- **`RecordsInterface.queryRecords()` / `PermissionsInterface.listPermissions()` skip (rather than throw on) any individual corrupted LevelDB entry**, logging a `console.warn` with the offending key. Fixed after deep-testing found that a single malformed JSON value anywhere in the store previously threw an uncaught error that broke list/query reads — and, since `checkPermission()` calls `listPermissions()` internally, broke **every authenticated read node-wide**, not just the corrupted record's own patient. `RecordsInterface.readRecord()` (single-ID lookup) and `PermissionsInterface.revokePermission()`'s by-`permissionId` path still throw a clear, isolated error when the *specifically requested* resource itself is corrupted — that's a real, resource-specific failure worth surfacing, not something to silently paper over.
+- **`approveRecovery()` in `mpoa-controller.ts` validates `approverRole` against `REQUIRED_APPROVER_ROLES` before accepting an approval.** Fixed after deep-testing found a raw HTTP body could send any string as `approverRole` (TypeScript's union type is compile-time only) — a bogus/typo'd role was silently stored but could never contribute to the 3-role threshold, permanently stranding that recovery request at `'pending'` with no error telling the caller why. Now rejected with a clear `400` naming the valid roles.
+- **`PermissionsInterface.revokePermission()` uses a per-key in-memory async mutex (`withLock`, private to `permissions.ts`)** to serialize concurrent revokes of the same `permissionId` or the same `{patientDID, grantedToDID, recordType}` triple. Fixed after deep-testing found revoke's read-then-write (an `await` point between `LevelDBAdapter.get` and `.put`) let two concurrent — or even just sequential idempotent — revoke calls on the same permission both log a `'consent_revoked'` audit event for what was logically one action. `revokePermission()` now returns `{ permissions, freshlyRevoked }`; `permission-routes.ts` only audit-logs `freshlyRevoked`, so an idempotent re-revoke (concurrent or sequential) produces zero additional audit events, while the HTTP response still always reflects full current state.
+- **Known limitation, deliberately left as-is (user decision):** MPOA's duplicate-approval check in `mpoa-controller.ts` is per-**role** only (`approvals.some(a => a.approverRole === approverRole)`), not per-**DID**. A single DID can approve as `patient`, `hospital`, and `guardian` on the same request and single-handedly satisfy the full 3-party threshold — nothing in this module cross-checks that a submitted `approverRole` actually matches the caller's real-world role. This weakens the "no single party can authorize recovery alone" guarantee to "no single *role* can be reused," not "no single *actor* can satisfy multiple roles." Confirmed via deep-testing (Day 1–10 regression), explicitly not fixed per user instruction — revisit if/when a real identity/role-binding layer exists (e.g., roles derived from verified credentials rather than caller-supplied strings).
+- `dwn/provider-node/` has been deleted (Days 11–12) — it was an empty `.gitkeep`-only scaffold, confirmed not part of the architecture. Do not recreate it.
+- **`Permission.actorRole` is only trusted when accompanied by `roleProofRecordId`** (Days 11–12) — this is the credential-backed fix for the exact role-binding weakness the MPOA known-limitation above describes, applied here instead of left as a limitation, per explicit user decision to pull it into scope. `grantPermission()` throws if `actorRole` is supplied without `roleProofRecordId`; `POST /shareRecord` maps that to 400, and a failed `verifyActorRoleProof()` call (unverified proof, or revealed role ≠ claimed role) to 403.
+- **`verifyActorRoleProof()` (`dwn/patient-node/src/interfaces/role-verification.ts`) does a plain, unauthenticated HTTP `GET` to `${verifierAgentBaseUrl}/proof-data/:proofRecordId`** — same accepted trust boundary as `PATIENT_DWN_URL` (no mTLS/API keys, consistent with "no discovery mechanism needed for local PoC"). Network/parse failures throw (not a silent `false`), so a misconfigured URL doesn't look identical to "the proof genuinely failed."
+- **No agent has a running HTTP server yet** (Days 14–15 not built), so role-proof verification could only be tested this session against a local mock server standing in for an agent's `/proof-data/:id` response — not a live agent. Same placeholder treatment as `DWN_MASTER_KEK`: the verification logic itself is real, live wiring is deferred to when its dependency (a running agent) exists.
+- **The `ProfessionalRoleCredential` schema (attributes: `role`, `licenseId`, `issuedAt`) is not yet registered anywhere** — issuing it requires the government agent's already-generic `/create-schema` + `/credential-definition` + `issueAnonCredsCredential` routes, but there's no running agent server to call them against until Days 14–15. A new schema was chosen over extending the existing identity credential because Indy schemas are immutable once registered.
+- `VP_SIGNING_SECRET` is a new required env var (Days 11–12), same throw-if-missing pattern as `DOCUMENT_SIGNING_SECRET`/`AUDIT_SIGNING_SECRET`/`CONSENT_SIGNING_SECRET` in `signing-utils.ts`. `VERIFIER_AGENT_BASE_URL` is a new optional env var providing the default base URL for `verifyActorRoleProof()`; `shareRecord` can override it per-call.
+- **Field-level redaction on `GET /dwn/queryRecord` (Days 11–12):** applies only to non-self, JSON-content reads. `Permission.allowedFields` (empty = unrestricted) is intersected with a matching `Protocol.allowedFields` — matched by `record.protocol` name **and** the permission's `actorRole` equaling the protocol's `actorRole` — via `ProtocolsInterface.applyFieldFilter()`. If multiple active permissions exist for the same `{patientDID, grantedToDID, recordType}` triple, the first active match governs redaction (a simplification; no "most permissive wins" merge logic was built).
+- `Protocol` is stored one row per `name` (`protocol:{name}` key), not per `name`+`actorRole` — matches CLAUDE.md's documented schema and its 1:1 examples (MedicalRecord/doctor, Prescription/pharmacist, InsuranceClaim/insurer). Calling `defineProtocol()` again with the same `name` overwrites its `actorRole`/`allowedFields`.
+- The generated W3C Verifiable Presentation (`ProtocolsInterface.generateVerifiablePresentation()`) is **JWT-based, not JSON-LD/LD-Proof** — deliberate, matches this repo's existing JWT-only signing convention (nothing else here uses Linked Data Proofs). The JWT signature is the "proof" for now; real patient-DID-based signing is deferred until patient wallet/DID work lands, same placeholder treatment as `Permission.consentVCId`.
+- **Deep-testing (Days 11–12, post-implementation adversarial pass) found and fixed 2 real bugs, same class as the Day 9–10 corrupted-entry findings:** (1) `GET /dwn/queryRecord`'s field-redaction step called `ProtocolsInterface.getProtocol(record.protocol)` unguarded — a single corrupted `Protocol` entry threw uncaught and 500'd every read of every record referencing that protocol name, **across every patient**, not just the corrupted protocol's own registrant. Now wrapped in try/catch with a `console.warn`; falls back to `Permission.allowedFields` alone (same as "no protocol defined for this name"). (2) `POST /dwn/protocols/define` (both the route's own pre-check and `ProtocolsInterface.defineProtocol()` internally) called `getProtocol()` unguarded to decide 200-vs-201/audit-event-type and to preserve `createdAt` — a corrupted entry at that exact name permanently blocked ever redefining/repairing it. Both call sites now treat a corrupted "existing" lookup as "none" (with a warning), so `defineProtocol()` can self-heal a corrupted protocol name instead of being permanently stuck.
+- **A second "funky scenario" adversarial pass (Days 11–12) found and fixed 2 more bugs in the field-redaction path itself:** (1) `ProtocolsInterface.applyFieldFilter()` used `field in data`, which walks the prototype chain — requesting an `allowedFields` entry like `"toString"` or `"constructor"` returned the inherited `Object.prototype` method as if it were real record data, since those names are technically "in" every plain object even though the record never had that key. Fixed: switched to `Object.prototype.hasOwnProperty.call(data, field)` (own-properties-only) and build the filtered result via `Object.create(null)` instead of `{}`, so a field literally named `"__proto__"` can't alter the returned object's own prototype either (confirmed harmless either way — it only affects that one returned object, not global state — but fixed for correctness, not just safety). (2) `ProtocolsInterface.defineProtocol()` accepted `allowedFields` as any truthy value with no array-type check — sending a plain string was silently stored as-is; downstream code assuming a real array (e.g. `.includes()`) would then run against string-substring semantics instead of array-membership semantics. Fixed: `defineProtocol()` now throws (and `POST /dwn/protocols/define` now 400s) if `allowedFields` isn't an array.
 
 ---
 

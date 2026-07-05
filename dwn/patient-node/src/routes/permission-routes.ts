@@ -5,10 +5,22 @@ import { AuditService } from '../../../../audit/src/services/audit-service';
 export const permissionRouter = Router();
 
 // POST /shareRecord — mounted at /dwn/shareRecord by server.ts (Day 13)
-// Body: { patientDID, grantedToDID, recordType, purpose, expiresAt?, allowedFields? }
+// Body: { patientDID, grantedToDID, recordType, purpose, expiresAt?, allowedFields?,
+//         actorRole?, roleProofRecordId?, verifierAgentBaseUrl? }
+// actorRole and roleProofRecordId must be supplied together — see permissions.ts.
 permissionRouter.post('/shareRecord', async (req: Request, res: Response) => {
   try {
-    const { patientDID, grantedToDID, recordType, purpose, expiresAt, allowedFields } = req.body;
+    const {
+      patientDID,
+      grantedToDID,
+      recordType,
+      purpose,
+      expiresAt,
+      allowedFields,
+      actorRole,
+      roleProofRecordId,
+      verifierAgentBaseUrl,
+    } = req.body;
 
     if (!patientDID || !grantedToDID || !recordType || !purpose) {
       return res.status(400).json({
@@ -16,14 +28,31 @@ permissionRouter.post('/shareRecord', async (req: Request, res: Response) => {
       });
     }
 
-    const permission = await PermissionsInterface.grantPermission({
-      patientDID,
-      grantedToDID,
-      recordType,
-      purpose,
-      expiresAt: expiresAt ?? null,
-      allowedFields,
-    });
+    if (actorRole && !roleProofRecordId) {
+      return res.status(400).json({
+        error: 'actorRole requires an accompanying roleProofRecordId',
+      });
+    }
+
+    let permission;
+    try {
+      permission = await PermissionsInterface.grantPermission({
+        patientDID,
+        grantedToDID,
+        recordType,
+        purpose,
+        expiresAt: expiresAt ?? null,
+        allowedFields,
+        actorRole,
+        roleProofRecordId,
+        verifierAgentBaseUrl,
+      });
+    } catch (err: unknown) {
+      if ((err as Error).message.startsWith('Role proof verification failed')) {
+        return res.status(403).json({ error: (err as Error).message });
+      }
+      throw err;
+    }
 
     await AuditService.record({
       eventType: 'consent_granted',
@@ -32,7 +61,7 @@ permissionRouter.post('/shareRecord', async (req: Request, res: Response) => {
       resourceId: permission.permissionId,
       resourceType: recordType,
       action: 'grantPermission',
-      metadata: { purpose, expiresAt: permission.expiresAt, consentVCId: permission.consentVCId },
+      metadata: { purpose, expiresAt: permission.expiresAt, consentVCId: permission.consentVCId, actorRole },
     });
 
     res.status(201).json(permission);
