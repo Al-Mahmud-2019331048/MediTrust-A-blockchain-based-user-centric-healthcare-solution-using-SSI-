@@ -3,7 +3,8 @@
   "private": true,
   "scripts": {
     "prisma:generate": "prisma generate --schema=audit/prisma/schema.prisma",
-    "prisma:migrate": "prisma migrate dev --schema=audit/prisma/schema.prisma"
+    "prisma:migrate": "prisma migrate dev --schema=audit/prisma/schema.prisma",
+    "dwn:dev": "tsx dwn/patient-node/server.ts"
   },
   "dependencies": {
     "@prisma/client": "^5",
@@ -23,6 +24,7 @@
     "@types/react": "^18",
     "@types/react-dom": "^18",
     "prisma": "^5",
+    "tsx": "^4",
     "typescript": "^5"
   }
 }

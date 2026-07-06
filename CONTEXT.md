@@ -23,7 +23,7 @@ The original defended thesis proposed SSI + DWN but the actual PoC used MongoDB 
 | 2   | Verifiable Credential System (issue, store, verify)                        | Exists                                               | `demo/credo/`                                    |
 | 3   | Digital Wallet (credential storage, Bifold mobile)                         | Exists                                               | Bifold + Credo-TS/Askar                          |
 | 4   | Selective Sharing — ZKP attribute-level + DWN Protocol field filtering     | **Done** (Days 11–12) — Protocol-based field filtering enforced on reads; JWT-based W3C VP generated from AnonCreds proof records | `demo/credo/` + `dwn/patient-node/`              |
-| 5   | DWN Implementation (Records + Permissions + Protocols interfaces, LevelDB) | Storage + Records + Permissions + Protocols **Done** (Days 5–12) | `dwn/patient-node/`                              |
+| 5   | DWN Implementation (Records + Permissions + Protocols interfaces, LevelDB) | **Done** (Days 5–13) — `server.ts` now mounts and runs everything as a real server | `dwn/patient-node/`                              |
 | 6   | Encryption Layer (AES-256-GCM + key wrapping) — built into DWN             | **Done** (Days 5–6) — key-wrap uses placeholder KEK  | `dwn/patient-node/src/encryption/`               |
 | 7   | MPOA + SSS Key Recovery (5 shares, 3 threshold, guardian approval)         | **Done**                                             | `crypto/sss/src/`                                |
 | 8   | Consent Management — DWN Permissions + Consent Receipt VC on Indy          | **Done** (folded into Module 5) — consent receipt is a real signed JWT, on-chain anchoring deferred to Days 16–17 | `dwn/patient-node/src/interfaces/permissions.ts` |
@@ -67,7 +67,7 @@ Results output: `benchmark/results/` as JSON + Markdown table.
 | MPOA              | Patient + Hospital + Guardian must approve before key release           | Threshold = 3 approvals                                                                                |
 | Smart contracts   | Out of scope                                                            | Indy has no VM. Consent and audit are handled by VCs and signed logs.                                  |
 | SSS library       | `shamir-secret-sharing` npm (pure JS, GF(2^8))                          | No native deps, well-maintained — installed at root                                                    |
-| DWN URL (agents → DWN) | `PATIENT_DWN_URL=http://localhost:5000` env var in each agent      | PoC runs fully local, all services on one machine, no discovery mechanism needed                       |
+| DWN URL (agents → DWN) | `PATIENT_DWN_URL=http://localhost:5050` env var in each agent      | PoC runs fully local, all services on one machine, no discovery mechanism needed. 5050 not 5000 — avoids macOS AirPlay Receiver's default port |
 | Hospital role in PoC   | Doctor agent (port 4002) is hospital's clinical representative      | Hospital participates as MPOA approver + SSS share holder (share 2) via API calls — no separate server |
 | Protocol role binding   | `Permission.actorRole` only trusted with a verified `roleProofRecordId` (AnonCreds proof of a `ProfessionalRoleCredential`) | Closes the same self-reported-role weakness documented as a known MPOA limitation — user chose to fix it here rather than defer |
 | VP format               | JWT-based W3C Verifiable Presentation, not JSON-LD/LD-Proof          | Matches this repo's existing JWT-only signing convention (signing-utils.ts) |
@@ -88,7 +88,7 @@ Pharmacy Agent   :4004          ← Verifies identity + prescription via DWN que
         │ After verification — doctor uploads record to DWN
         ▼
 ┌─────────────────────────────────────────────────┐
-│  Full DWN Patient Node :5000                    │
+│  Full DWN Patient Node :5050                    │
 │  (runs on patient's machine)                    │
 │                                                 │
 │  Records Interface                              │
@@ -209,6 +209,7 @@ Hyperledger Indy (BCovrin)  ← DIDs, VCs, Consent Receipt VCs, Revocation
 - `dwn/patient-node/src/interfaces/role-verification.ts` — verifyActorRoleProof(): HTTP call to an agent's `GET /proof-data/:id`, checks `isVerified` + revealed `role` attribute (Done Day 11–12; tested against a mock server only, no live agent yet)
 - `dwn/patient-node/src/routes/protocol-routes.ts` — `POST /dwn/protocols/define`, `GET /dwn/protocols/query`, `POST /dwn/protocols/generate-vp` (Done Day 11–12)
 - `crypto/encryption/src/signing-utils.ts` — `signVerifiablePresentation`/`verifyVerifiablePresentation` added, 4th JWT secret (`VP_SIGNING_SECRET`) (Done Day 11–12)
+- `dwn/patient-node/server.ts` — Express entry point mounting `recordRouter`+`permissionRouter` at `/dwn`, `protocolRouter` at `/dwn/protocols`; `GET /health`; 404 + error-handling middleware; `DWN_PORT` (default 5050, not 5000 — see Known Constraints); SIGINT/SIGTERM close `LevelDBAdapter`; run via `npm run dwn:dev` (Done Day 13, smoke-tested live end-to-end)
 
 ---
 
@@ -222,7 +223,7 @@ Hyperledger Indy (BCovrin)  ← DIDs, VCs, Consent Receipt VCs, Revocation
 | ~~7–8~~ | ~~DWN Records Interface~~     | **Done** — `records.ts` (createRecord/readRecord/queryRecords, `Buffer`/JSON string input, real SHA-256 hash, placeholder `integrityVCId`), `record-routes.ts` (`POST /storeRecord`, `GET /queryRecord`, ciphertext-only reads); update/delete deferred |
 | ~~9–10~~ | ~~DWN Permissions Interface~~ | **Done** — `permissions.ts` (grantPermission/revokePermission/checkPermission/listPermissions, real `signConsentReceipt()` JWT), `permission-routes.ts` (`POST /shareRecord`, `DELETE /revokeAccess`); `queryRecord` now permission-gated + decrypts on authorized read |
 | ~~11–12~~ | ~~DWN Protocols Interface~~ | **Done** — `protocols.ts`, `role-verification.ts`, `protocol-routes.ts`; generates a JWT-based W3C VP from an AnonCreds proof; `permissions.ts`/`record-routes.ts` wired for role-verified field redaction; `dwn/provider-node/` deleted |
-| 13      | DWN server.ts                | `dwn/patient-node/server.ts`, `tsconfig.json` — no separate package.json needed (root package.json covers all deps)                                                                                                                                                                  |
+| ~~13~~  | ~~DWN server.ts~~            | **Done** — `dwn/patient-node/server.ts`; added `tsx` devDependency + `dwn:dev` script to actually run it; smoke-tested live (storeRecord → self-read → protocols/define, health, 404, malformed-JSON, graceful shutdown) |
 | 14–15   | Agent server.ts              | `agents/government-agent/server.ts`, `agents/doctor-agent/server.ts`, `agents/pharmacy-agent/server.ts`                                                                                                                                                                              |
 | 16–17   | Wire agents → DWN            | `medical-routes.ts` — VC → DWN createRecord; agents read `PATIENT_DWN_URL` from `.env` to call DWN HTTP API; **+** on-chain audit VC for key splits and consent events                                                                                                               |
 | 18      | Benchmark                    | `benchmark/run-experiments.ts` — all 8 experiments; **+** key recovery success rate (%); **+** 5 attack simulation scenarios                                                                                                                                                         |
@@ -264,7 +265,7 @@ Hyperledger Indy (BCovrin)  ← DIDs, VCs, Consent Receipt VCs, Revocation
 - `audit/package.json` intentionally does not exist — all deps consolidated into root `package.json` (monorepo structure); do not create per-module package files
 - Doctor agent writes to patient DWN without a permission grant — doctor is the author of the clinical record; patient sovereignty is enforced at the READ layer only
 - All reads require explicit patient permission grant via `shareRecord` — read without valid grant returns 403
-- `PATIENT_DWN_URL=http://localhost:5000` must be set in each agent's `.env` — all agents call the DWN via this URL; no discovery mechanism needed for local PoC
+- `PATIENT_DWN_URL=http://localhost:5050` must be set in each agent's `.env` — all agents call the DWN via this URL; no discovery mechanism needed for local PoC. Port changed from the originally-documented 5000 to 5050 on Day 13 to avoid a real macOS AirPlay Receiver conflict.
 - Deep-testing (Day 1–10 full regression, post Days 9–10) found and fixed 3 real bugs: (1) a single corrupted LevelDB entry used to throw uncaught and break `queryRecords`/`listPermissions` node-wide — since `checkPermission()` calls `listPermissions()`, this broke *every* authenticated read, not just the corrupted record's own patient; both now skip corrupted entries with a `console.warn`, while a *directly requested* corrupted resource (`readRecord`, revoke-by-`permissionId`) still throws a clear, isolated error. (2) `approveRecovery()` accepted any string as `approverRole` via raw HTTP with no server-side validation (TS union types are compile-time only) — a typo'd role was silently stored but could never satisfy the threshold, permanently stranding the request; now validated, rejected with `400`. (3) `revokePermission()`'s read-then-write had an await-point race — concurrent *or even sequential idempotent* re-revokes of the same permission logged duplicate `consent_revoked` audit events; fixed with a per-key async mutex (`withLock`, private to `permissions.ts`) plus a `{ permissions, freshlyRevoked }` return split so only genuine state transitions get audited.
 - **Known limitation, left as-is (explicit user decision):** MPOA's duplicate-approval check is per-role, not per-DID — one DID can approve as `patient`+`hospital`+`guardian` and single-handedly satisfy the full 3-party threshold. Confirmed via testing, not fixed. Revisit once a real identity/role-binding layer exists.
 - `dwn/provider-node/` deleted (Days 11–12) — was an empty `.gitkeep`-only scaffold, not part of the architecture.
@@ -277,6 +278,9 @@ Hyperledger Indy (BCovrin)  ← DIDs, VCs, Consent Receipt VCs, Revocation
 - The generated W3C VP is JWT-based, not JSON-LD/LD-Proof — matches this repo's JWT-only signing convention; real patient-DID-based signing deferred until patient wallet/DID work lands, same treatment as `consentVCId`.
 - **Post-implementation adversarial testing (Days 11–12) found and fixed 2 bugs, same class as the Day 9–10 corrupted-entry findings:** a corrupted `Protocol` entry used to 500 `queryRecord` for every record referencing it, across every patient (fixed: soft-fallback to `Permission.allowedFields` alone, same as no-protocol-defined); and `POST /dwn/protocols/define` used to be permanently blocked from ever repairing a corrupted entry at the same name (fixed: a corrupted "existing" lookup is now treated as "none" rather than propagating). See CLAUDE.md Known Constraints for full detail.
 - **A follow-up "funky scenario" pass found and fixed 2 more bugs in the redaction path:** `applyFieldFilter()`'s `field in data` check leaked inherited `Object.prototype` methods (e.g. `"toString"`) as if they were real record fields (fixed with `hasOwnProperty` + `Object.create(null)`); and `defineProtocol()` accepted non-array `allowedFields` silently (fixed with an explicit array-type check, 400 at the route). See CLAUDE.md Known Constraints for full detail.
+- A root `.env` now exists (Day 13, gitignored) with 5 self-generated secrets (no external credentials needed anywhere for this PoC) — see CLAUDE.md for the exact generation commands.
+- `tsx` added as a root devDependency (Day 13) to actually run `server.ts` — the shared tsconfig's bundler-oriented settings (needed for Next.js) aren't directly runnable by plain `ts-node`; Days 14–15's agent servers should reuse this approach.
+- **DWN port changed from 5000 to 5050 (Day 13, resolved)** — port 5000 is occupied by macOS's AirPlay Receiver by default; rather than requiring a system-setting change, the project's own default port moved to 5050 everywhere (`server.ts`, `PATIENT_DWN_URL`, all docs). No action needed for Days 14–17.
 
 ---
 
@@ -292,7 +296,7 @@ Hyperledger Indy (BCovrin)  ← DIDs, VCs, Consent Receipt VCs, Revocation
 | Audit storage                 | SQLite via Prisma — MongoDB removed                                          |
 | `consent/` service            | Removed — folded into DWN Permissions interface                              |
 | `interface/` migration        | Not a priority — legacy interface/ stays, apps/web/ gets new pages as needed |
-| DWN URL discovery             | Not needed — `PATIENT_DWN_URL=http://localhost:5000` env var; PoC is fully local |
+| DWN URL discovery             | Not needed — `PATIENT_DWN_URL=http://localhost:5050` env var; PoC is fully local (port moved from 5000 to 5050 Day 13, AirPlay conflict) |
 | Hospital role                 | Doctor agent is hospital's clinical rep; hospital in MPOA + SSS fulfilled via API calls — no separate server |
 | DWN Protocols enforcement     | Attribute-level field filtering via `allowedFields` (Permission) intersected with `Protocol.allowedFields`, applied on `queryRecord` reads |
 | Role-based Protocol claims    | Credential-backed (`roleProofRecordId` + `verifyActorRoleProof()`), not a self-reported string — explicit user decision |
