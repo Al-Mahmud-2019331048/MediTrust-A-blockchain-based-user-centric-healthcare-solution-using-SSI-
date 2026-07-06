@@ -36,13 +36,16 @@ sssRouter.post('/split', async (req: Request, res: Response) => {
 });
 
 // POST /sss/recovery/initiate
-// Body: { patientDid: string }
+// Body: { patientDid: string, expiryHours?: number }
+// expiryHours defaults to 24 (initiateRecovery's own default) — exposed here
+// mainly so benchmark/attack-simulation testing can exercise real expiry
+// behavior without waiting 24 hours, not for normal callers to change.
 sssRouter.post('/recovery/initiate', (req: Request, res: Response) => {
   try {
-    const { patientDid } = req.body;
+    const { patientDid, expiryHours } = req.body;
     if (!patientDid) return res.status(400).json({ error: 'patientDid is required' });
 
-    const request = initiateRecovery(patientDid);
+    const request = typeof expiryHours === 'number' ? initiateRecovery(patientDid, expiryHours) : initiateRecovery(patientDid);
     res.json(request);
   } catch (err: unknown) {
     res.status(500).json({ error: (err as Error).message });

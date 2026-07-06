@@ -28,7 +28,7 @@ The original defended thesis proposed SSI + DWN but the actual PoC used MongoDB 
 | 7   | MPOA + SSS Key Recovery (5 shares, 3 threshold, guardian approval)         | **Done**                                             | `crypto/sss/src/`                                |
 | 8   | Consent Management — DWN Permissions + Consent Receipt VC on Indy          | **Done** (folded into Module 5) — consent receipt is a real signed JWT, on-chain anchoring deferred to Days 16–17 | `dwn/patient-node/src/interfaces/permissions.ts` |
 | 9   | Audit Trail (persistent SQLite, signed, every DWN event)                   | **Done**                                             | `audit/src/`                                     |
-| 10  | Security Evaluation (8 experiments, metrics table)                         | **Not built**                                        | `benchmark/`                                     |
+| 10  | Security Evaluation (8 experiments, metrics table)                         | **Done** (Day 18) — 6/8 real, 2 honestly blocked (ledger connectivity), all 5 attack sims pass | `benchmark/`                                     |
 
 ---
 
@@ -65,7 +65,7 @@ Results output: `benchmark/results/` as JSON + Markdown table.
 | SSS threshold     | 5 total shares, any 3 reconstruct MEK                                   | (5,3) Shamir — thesis requirement                                                                      |
 | Share holders     | Patient device, Hospital, Trusted family, Backup server, Recovery agent | Per requirements document                                                                              |
 | MPOA              | Patient + Hospital + Guardian must approve before key release           | Threshold = 3 approvals                                                                                |
-| Smart contracts   | Out of scope                                                            | Indy has no VM. Consent and audit are handled by VCs and signed logs.                                  |
+| Smart contracts   | Out of scope, permanently, per explicit user instruction                | Indy has no VM. Consent and audit are handled by VCs and signed logs. Re-confirmed directly against the original requirements doc — the doc only *suggested* Fabric/Ethereum, didn't mandate it; Indy's DID/VC-native fit was the deliberate choice. Do not revisit. |
 | SSS library       | `shamir-secret-sharing` npm (pure JS, GF(2^8))                          | No native deps, well-maintained — installed at root                                                    |
 | DWN URL (agents → DWN) | `PATIENT_DWN_URL=http://localhost:5050` env var in each agent      | PoC runs fully local, all services on one machine, no discovery mechanism needed. 5050 not 5000 — avoids macOS AirPlay Receiver's default port |
 | Hospital role in PoC   | Doctor agent (port 4002) is hospital's clinical representative      | Hospital participates as MPOA approver + SSS share holder (share 2) via API calls — no separate server |
@@ -192,7 +192,8 @@ Hyperledger Indy (BCovrin)  ← DIDs, VCs, Consent Receipt VCs, Revocation
 - `agents/shared/network/network-config.ts` — BCovrin TestNet genesis
 - `agents/shared/common-routes.ts`, `verifier-routes.ts`, `debug-routes.ts`
 - `agents/government-agent/src/routes/credential-routes.ts`
-- `agents/doctor-agent/src/routes/medical-routes.ts`
+- `agents/doctor-agent/src/routes/medical-routes.ts` — (Days 16–17) now calls `writeIssuedDocumentToDWN()` after issuance succeeds
+- `agents/shared/dwn-client.ts` — (Days 16–17, new) thin `storeRecord()` HTTP client, `PATIENT_DWN_URL`'s first real consumer
 - `agents/pharmacy-agent/src/routes/pharmacy-routes.ts`
 - `crypto/encryption/src/hash-utils.ts`, `signing-utils.ts`, `verify-utils.ts`
 - `audit/src/services/audit-service.ts` — SQLite via Prisma, JWT-signed, persistent (Done Day 1–2)
@@ -224,11 +225,13 @@ Hyperledger Indy (BCovrin)  ← DIDs, VCs, Consent Receipt VCs, Revocation
 | ~~9–10~~ | ~~DWN Permissions Interface~~ | **Done** — `permissions.ts` (grantPermission/revokePermission/checkPermission/listPermissions, real `signConsentReceipt()` JWT), `permission-routes.ts` (`POST /shareRecord`, `DELETE /revokeAccess`); `queryRecord` now permission-gated + decrypts on authorized read |
 | ~~11–12~~ | ~~DWN Protocols Interface~~ | **Done** — `protocols.ts`, `role-verification.ts`, `protocol-routes.ts`; generates a JWT-based W3C VP from an AnonCreds proof; `permissions.ts`/`record-routes.ts` wired for role-verified field redaction; `dwn/provider-node/` deleted |
 | ~~13~~  | ~~DWN server.ts~~            | **Done** — `dwn/patient-node/server.ts`; added `tsx` devDependency + `dwn:dev` script to actually run it; smoke-tested live (storeRecord → self-read → protocols/define, health, 404, malformed-JSON, graceful shutdown) |
-| 14–15   | Agent server.ts              | `agents/government-agent/server.ts`, `agents/doctor-agent/server.ts`, `agents/pharmacy-agent/server.ts`                                                                                                                                                                              |
-| 16–17   | Wire agents → DWN            | `medical-routes.ts` — VC → DWN createRecord; agents read `PATIENT_DWN_URL` from `.env` to call DWN HTTP API; **+** on-chain audit VC for key splits and consent events                                                                                                               |
-| 18      | Benchmark                    | `benchmark/run-experiments.ts` — all 8 experiments; **+** key recovery success rate (%); **+** 5 attack simulation scenarios                                                                                                                                                         |
-| 19      | End-to-end test              | Full flow: DID → VC → storeRecord → shareRecord → selective read (VP) → revokeAccess → on-chain audit VC                                                                                                                                                                             |
-| 20      | Documentation                | README, CLAUDE.md, CONTEXT.md final update                                                                                                                                                                                                                                           |
+| ~~14–15~~ | ~~Agent server.ts~~         | **Done** — all 3 boot/init/mount live; added real `@credo-ts/*`/`@hyperledger/*` root deps (were type-check-only before); real DIDs registered on BCovrin; schema/credDef writes blocked by dev-network pool connectivity, not a code issue (see Known Constraints) |
+| ~~16–17~~ | ~~Wire agents → DWN~~      | **Done (doctor-agent only)** — `agents/shared/dwn-client.ts` (new), `medical-routes.ts`'s `writeIssuedDocumentToDWN()`; `PATIENT_DWN_URL` has its first real consumer. On-chain audit VC for key splits/consent events deferred as a genuine open design question (DWN has no wallet/DIDComm identity to receive a credential) |
+| ~~18~~  | ~~Benchmark~~                | **Done** — `benchmark/run-experiments.ts`, all 8 experiments attempted + key recovery success rate + 5 attack simulations, all passing; `crypto/sss/server.ts` built as a necessary companion (SSS/MPOA had no server anywhere before) |
+| ~~19~~  | ~~End-to-end test~~          | **Done** — `e2e/full-flow-test.ts`, real 10-step flow; also fixed `/issue-medical-credential`'s hard-fail (no fallback) to match `/issue-prescription`'s pattern |
+| ~~20~~  | ~~Documentation~~            | **Done** — README.md rewritten, this final docs pass                                                                                                                                                                                                                                |
+
+**Frontend Track (future, unscheduled):** `apps/web/` has only reusable components/hooks/services today, no Next.js scaffolding (no `package.json`, `next.config.js`, or `app/` directory). A patient consent dashboard is buildable now, independent of agent work, since the DWN already runs. Government/doctor/pharmacist portal pages (real QR codes for Bifold) become buildable once Days 14–17 land, by porting `interface/`'s already-verified-working equivalent pages onto the new agent contract. `interface/`'s `patient`/`verifier` pages are non-functional mockups, not a porting target.
 
 ---
 
@@ -260,6 +263,14 @@ Hyperledger Indy (BCovrin)  ← DIDs, VCs, Consent Receipt VCs, Revocation
 - `agents/shared/db-singleton.ts` is now unused — do not import it in new agents
 - No server.ts entry points exist for any new agent — they cannot run yet
 - No package.json exists in `dwn/`, `crypto/sss/`, `benchmark/`, `agents/*/`
+- **`crypto/sss/server.ts` (Day 18, new)** — first server ever built for SSS/MPOA; mounts `sssRouter` at `/sss`, `SSS_PORT` default `4008`, `npm run sss:dev`.
+- **`initiateRecovery()` gained an optional `expiryHours` param (default 24)** — lets the "expired MPOA request" attack test a real expiry without waiting 24h or mocking the clock. `POST /sss/recovery/initiate` forwards it.
+- **`benchmark/run-experiments.ts` (Day 18):** 6/8 experiments are fully real today (DWN storage/selective-sharing/revocation, SSS recovery/split, key recovery success rate). 2 (blockchain tx latency, VC verification) honestly report `blocked` with the real error. VC issuance genuinely runs the full DIDComm flow via a temporary test-patient agent but reports `degraded` since it falls back to the existing W3C-message path when no real credDef exists — real timing, clearly labeled as the fallback, not the intended metric.
+- **Discovery: an agent's HTTP routes mount only after its ledger-timeout retries finish** — on this network that takes noticeably longer than a few seconds. Wait for the `"...routes mounted. Ready."` log line before treating a quick "not reachable" check as meaningful.
+- **Fixed (Day 19, per explicit user instruction): `/issue-medical-credential` used to hard-400 with no fallback, unlike `/issue-prescription`'s proven graceful pattern** — a leftover from before Days 16-17's fallback+DWN-write system existed, not deliberate. Now mirrors `/issue-prescription` exactly; confirmed working live in Day 19's E2E test.
+- `benchmark/test-patient-helper.ts` (Day 19) — shared test-patient connection logic, used by both `benchmark/` and `e2e/`.
+- `e2e/full-flow-test.ts` (Day 19) — real, permanent 10-step flow test (not throwaway), all steps passed on first run. Results in `e2e/results/`.
+- `README.md` was significantly stale before Day 20 (wrong port, claimed unbuilt functions as done, pre-Day-5 module status) — fully rewritten.
 - `consent/` directory is removed — do not create it
 - `dwn/provider-node/` exists on disk but is not in the architecture — delete before Day 13
 - `audit/package.json` intentionally does not exist — all deps consolidated into root `package.json` (monorepo structure); do not create per-module package files
@@ -281,6 +292,13 @@ Hyperledger Indy (BCovrin)  ← DIDs, VCs, Consent Receipt VCs, Revocation
 - A root `.env` now exists (Day 13, gitignored) with 5 self-generated secrets (no external credentials needed anywhere for this PoC) — see CLAUDE.md for the exact generation commands.
 - `tsx` added as a root devDependency (Day 13) to actually run `server.ts` — the shared tsconfig's bundler-oriented settings (needed for Next.js) aren't directly runnable by plain `ts-node`; Days 14–15's agent servers should reuse this approach.
 - **DWN port changed from 5000 to 5050 (Day 13, resolved)** — port 5000 is occupied by macOS's AirPlay Receiver by default; rather than requiring a system-setting change, the project's own default port moved to 5050 everywhere (`server.ts`, `PATIENT_DWN_URL`, all docs). No action needed for Days 14–17.
+- **Real blocker fixed (Days 14–15): `@credo-ts/*`/`@hyperledger/*` weren't actually installed at root** — only type-check-resolvable via a `demo/credo/node_modules` path alias, which doesn't affect Node's real runtime module resolution. Added as real root dependencies matching `demo/credo/package.json`'s pinned versions; removed the now-dead path aliases. `cors` also added as a real dependency (was type-stubs only).
+- **All 3 agent servers boot and mount routes live, verified this session** (not throwaway) — government/doctor each register their own schema+credDef with a dummy-id fallback on failure; pharmacy is verifier-only, creates neither. Cross-agent credDef env vars (`ISSUER_CRED_DEF_ID`, `DOCTOR_MEDICAL_CRED_DEF_ID`) don't propagate automatically between agents — each is a separate process, manual copy+restart required.
+- **Real DIDs registered for all 3 agents on BCovrin** via `test.bcovrin.vonx.io/register` (not `selfserve.bcovrin.vonx.io` — that hostname doesn't resolve). Genuinely distinct seeds per agent.
+- **Known environment limitation, not a code defect:** the actual Indy ledger pool connection (raw TCP to BCovrin validator nodes, ports 9701–9708) is blocked on the dev network used this session — confirmed via direct port tests. DID *registration* (HTTPS) works fine; DID *resolution*/schema/credDef writes (which need the pool link) don't, from this network. See CLAUDE.md for full detail.
+- **`patientDID` for DWN writes is derived from the DIDComm connection's `theirDid`, falling back to the bare `connectionId`** (Days 16–17) — a deliberate placeholder (same treatment as the KEK placeholder), since `theirDid` is ephemeral/connection-scoped, not a stable patient identity; matches an identical existing pattern already in legacy `demo/credo/src/routes/document-routes.ts`. Real fix needs the patient to have their own persistent wallet-anchored DID.
+- **DWN write failures don't fail the issuance HTTP response** (Days 16–17) — the credential was already issued and can't be un-issued; surfaced as a non-fatal `dwnWriteError` field instead. Verified via 9 checks against a real running DWN with a hand-built fake agent (real issuance still blocked by the network limitation above).
+- **Deliberately deferred: on-chain audit VC issuance for key splits/consent events** — the DWN has no wallet/DIDComm identity to receive a credential, so this doesn't fit the existing issuance model; left as an open design question, not silently dropped.
 
 ---
 

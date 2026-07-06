@@ -4,10 +4,25 @@
   "scripts": {
     "prisma:generate": "prisma generate --schema=audit/prisma/schema.prisma",
     "prisma:migrate": "prisma migrate dev --schema=audit/prisma/schema.prisma",
-    "dwn:dev": "tsx dwn/patient-node/server.ts"
+    "dwn:dev": "tsx dwn/patient-node/server.ts",
+    "gov:dev": "tsx agents/government-agent/server.ts",
+    "doctor:dev": "tsx agents/doctor-agent/server.ts",
+    "pharmacy:dev": "tsx agents/pharmacy-agent/server.ts",
+    "sss:dev": "tsx crypto/sss/server.ts",
+    "benchmark": "tsx benchmark/run-experiments.ts",
+    "e2e-test": "tsx e2e/full-flow-test.ts"
   },
   "dependencies": {
+    "@credo-ts/anoncreds": "0.5.13",
+    "@credo-ts/askar": "0.5.13",
+    "@credo-ts/core": "0.5.13",
+    "@credo-ts/indy-vdr": "0.5.13",
+    "@credo-ts/node": "0.5.13",
+    "@hyperledger/anoncreds-nodejs": "^0.2.2",
+    "@hyperledger/aries-askar-nodejs": "^0.2.3",
+    "@hyperledger/indy-vdr-nodejs": "^0.2.2",
     "@prisma/client": "^5",
+    "cors": "^2",
     "dotenv": "^16",
     "express": "^4",
     "jsonwebtoken": "^9",

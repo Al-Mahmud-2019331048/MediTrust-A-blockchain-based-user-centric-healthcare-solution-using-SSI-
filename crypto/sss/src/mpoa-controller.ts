@@ -16,10 +16,10 @@ function isExpired(request: RecoveryRequest): boolean {
   return new Date() > new Date(request.expiresAt);
 }
 
-export function initiateRecovery(patientDid: string): RecoveryRequest {
+export function initiateRecovery(patientDid: string, expiryHours: number = EXPIRY_HOURS): RecoveryRequest {
   const requestId = generateId();
   const now = new Date();
-  const expiresAt = new Date(now.getTime() + EXPIRY_HOURS * 60 * 60 * 1000);
+  const expiresAt = new Date(now.getTime() + expiryHours * 60 * 60 * 1000);
 
   const request: RecoveryRequest = {
     requestId,
