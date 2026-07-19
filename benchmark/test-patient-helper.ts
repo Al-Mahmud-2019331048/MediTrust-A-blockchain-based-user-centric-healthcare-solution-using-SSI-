@@ -28,9 +28,27 @@ export async function pollUntil<T>(fn: () => Promise<T | undefined>, timeoutMs: 
   return undefined;
 }
 
-export async function createTestPatientAgent(port = 4010): Promise<BaseAgent> {
+// Port 4020 is reserved for this temporary agent specifically because it's
+// clear of every real service's port (DWN 5050, government 4000/4001,
+// doctor 4002/4003, pharmacy 4004/4005, healthcare-authority 4006/4007, sss
+// 4008, backup-provider 4010) — a prior collision with backup-provider's
+// default port caused BaseAgent.init() to hang indefinitely rather than
+// fail, since Credo-TS's HttpInboundTransport never rejects its own promise
+// on a port-bind failure. Confirmed live: same symptom reproduces on any
+// already-occupied port. The startup timeout below is the actual fix for
+// that failure mode — it can't be fixed inside Credo-TS itself, but a
+// hung init() can be bounded and surfaced clearly from here.
+export async function createTestPatientAgent(port = 4020, timeoutMs = 15000): Promise<BaseAgent> {
   const testPatient = new BaseAgent({ port, label: 'Test Patient', publicEndpoint: `http://localhost:${port}` });
-  await testPatient.init();
+  const timeout = new Promise<never>((_, reject) =>
+    setTimeout(() => reject(new Error(
+      `Test-patient agent failed to start within ${timeoutMs}ms on port ${port} — ` +
+      `most likely another process is already bound to this port (check with ` +
+      `\`lsof -nP -iTCP:${port} -sTCP:LISTEN\`); Credo-TS's HttpInboundTransport ` +
+      `hangs rather than erroring on a bind failure, so this timeout is what actually surfaces it.`
+    )), timeoutMs)
+  );
+  await Promise.race([testPatient.init(), timeout]);
   return testPatient;
 }
 

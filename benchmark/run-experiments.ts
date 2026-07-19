@@ -281,7 +281,7 @@ async function runVcIssuanceAndVerification(): Promise<void> {
   }
 
   try {
-    const testPatient = await createTestPatientAgent(4010);
+    const testPatient = await createTestPatientAgent(4020);
     const connection = await connectTestPatientTo(testPatient, GOV_URL, 'Benchmark Test Patient');
 
     if (!connection) {

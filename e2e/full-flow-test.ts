@@ -42,7 +42,7 @@ async function main() {
   if (!govUp) {
     steps.push({ step: '2. VC (identity issuance)', status: 'blocked', detail: `government-agent not reachable at ${GOV_URL}` });
   } else {
-    testPatient = await createTestPatientAgent(4010);
+    testPatient = await createTestPatientAgent(4020);
     const govConnection = await connectTestPatientTo(testPatient, GOV_URL, 'E2E Test Patient');
     if (!govConnection) {
       steps.push({ step: '2. VC (identity issuance)', status: 'blocked', detail: 'Connection to government-agent did not complete within 15s' });
@@ -72,7 +72,7 @@ async function main() {
   if (!doctorUp) {
     steps.push({ step: '3. Doctor verifies + issues', status: 'blocked', detail: `doctor-agent not reachable at ${DOCTOR_URL}` });
   } else {
-    if (!testPatient) testPatient = await createTestPatientAgent(4011);
+    if (!testPatient) testPatient = await createTestPatientAgent(4021);
     const doctorConnection = await connectTestPatientTo(testPatient, DOCTOR_URL, 'E2E Test Patient');
     if (!doctorConnection) {
       steps.push({ step: '3. Doctor verifies + issues', status: 'blocked', detail: 'Connection to doctor-agent did not complete within 15s' });
