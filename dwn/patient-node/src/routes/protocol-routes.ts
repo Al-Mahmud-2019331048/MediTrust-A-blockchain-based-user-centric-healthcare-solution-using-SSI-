@@ -1,5 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { ProtocolsInterface } from '../interfaces/protocols';
+import { backupWrite } from '../backup/backup-service';
 import { AuditService } from '../../../../audit/src/services/audit-service';
 
 export const protocolRouter = Router();
@@ -38,6 +39,14 @@ protocolRouter.post('/define', async (req: Request, res: Response) => {
       resourceType: 'protocol',
       action: 'defineProtocol',
       metadata: { actorRole, allowedFields },
+    });
+
+    // Protocols are non-secret schema metadata, backed up in plaintext,
+    // deliberately outside the MEK/MPOA-gated path (see backup-service.ts).
+    await backupWrite({
+      entityType: 'protocol',
+      entityKey: `protocol:${name}`,
+      entity: protocol,
     });
 
     res.status(existing ? 200 : 201).json(protocol);

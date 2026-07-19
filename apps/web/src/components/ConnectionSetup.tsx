@@ -45,11 +45,13 @@ const ConnectionSetup = ({ agentType, label, onConnected, isVerifier = false }: 
       const endpoint = connectionId
         ? `/connections?connectionId=${connectionId}`
         : `/connections?outOfBandId=${oobId}`;
-      const base = (process.env.NEXT_PUBLIC_GOVERNMENT_URL || 'http://localhost:4000').replace(
-        'localhost:4000',
-        agentType === 'doctor' ? 'localhost:4002' : agentType === 'pharmacist' ? 'localhost:4004' : 'localhost:4000'
-      );
-      const resp = await fetch(`${base}${endpoint}`);
+      const AGENT_BASES: Record<AgentType, string> = {
+        government: process.env.NEXT_PUBLIC_GOVERNMENT_URL || 'http://localhost:4000',
+        doctor: process.env.NEXT_PUBLIC_DOCTOR_URL || 'http://localhost:4002',
+        pharmacist: process.env.NEXT_PUBLIC_PHARMACIST_URL || 'http://localhost:4004',
+        'healthcare-authority': process.env.NEXT_PUBLIC_HEALTHCARE_AUTHORITY_URL || 'http://localhost:4006',
+      };
+      const resp = await fetch(`${AGENT_BASES[agentType]}${endpoint}`);
       const data = await resp.json();
       const items = Array.isArray(data) ? data : [data];
       const completed = items.find((c: any) => c.state === 'completed' || c.state === 'active');

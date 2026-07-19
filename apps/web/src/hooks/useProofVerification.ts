@@ -1,6 +1,6 @@
 'use client';
 import { useState, useCallback } from 'react';
-import { AgentType, getProofStatus, sendProofRequest } from '../services/apiService';
+import { AgentType, getProofData, getProofStatus, sendProofRequest } from '../services/apiService';
 import { extractProofData, ProofResult } from '../utils/proof-parser';
 import { usePolling } from './usePolling';
 
@@ -8,7 +8,15 @@ export type VerificationState = 'idle' | 'requesting' | 'polling' | 'verified' |
 
 // Extracted from doctor/page.jsx lines 86–170.
 // Handles: send proof request → poll proof-status → extract proof data → done.
-export function useProofVerification(agentType: AgentType, connectionId: string | null) {
+// requestFn overrides the default generic POST /send-proof-request call —
+// used by the Pharmacy Portal to hit pharmacy-agent's own bespoke
+// /verify-patient-identity and /verify-prescription routes instead, while
+// reusing this hook's polling/extraction logic unchanged.
+export function useProofVerification(
+  agentType: AgentType,
+  connectionId: string | null,
+  requestFn?: (connectionId: string, proofLabel: string) => Promise<{ id: string }>
+) {
   const [state, setState] = useState<VerificationState>('idle');
   const [proofRecordId, setProofRecordId] = useState<string | null>(null);
   const [proofData, setProofData] = useState<ProofResult | null>(null);
@@ -20,7 +28,9 @@ export function useProofVerification(agentType: AgentType, connectionId: string 
       setState('requesting');
       setError(null);
       try {
-        const result = await sendProofRequest(agentType, connectionId, proofLabel);
+        const result = requestFn
+          ? await requestFn(connectionId, proofLabel)
+          : await sendProofRequest(agentType, connectionId, proofLabel);
         setProofRecordId(result.id);
         setState('polling');
       } catch (err: any) {
@@ -28,9 +38,11 @@ export function useProofVerification(agentType: AgentType, connectionId: string 
         setState('failed');
       }
     },
-    [agentType, connectionId]
+    [agentType, connectionId, requestFn]
   );
 
+  // GET /proof-status/:id only returns { state, isVerified, timestamp } — no
+  // presentation data. Cheap to poll frequently, used just to detect "done."
   const checkProofStatus = useCallback(async () => {
     if (!proofRecordId) return null;
     const status = await getProofStatus(agentType, proofRecordId);
@@ -38,8 +50,19 @@ export function useProofVerification(agentType: AgentType, connectionId: string 
     return null;
   }, [agentType, proofRecordId]);
 
-  usePolling(checkProofStatus, (status) => {
-    const parsed = extractProofData(status);
+  usePolling(checkProofStatus, async () => {
+    if (!proofRecordId) return;
+    // Verified per /proof-status, but the actual revealed attributes only
+    // come from /proof-data — extractProofData() needs its `presentation`
+    // field, which /proof-status never includes. One extra call here, only
+    // once the cheap poll confirms verification, not on every poll tick.
+    const data = await getProofData(agentType, proofRecordId);
+    const parsed = extractProofData(data);
+    if (!parsed) {
+      setError('Verification succeeded but proof data could not be parsed');
+      setState('failed');
+      return;
+    }
     setProofData(parsed);
     setState('verified');
   }, {

@@ -19,7 +19,10 @@ const agentSeed = process.env.DOCTOR_SEED || '';
 
 const app = express();
 app.use(cors());
-app.use(express.json());
+// Default 100kb limit is too small for base64-encoded PDF/image attachments
+// on /issue-medical-credential and /issue-prescription — matches the DWN's
+// own server.ts limit.
+app.use(express.json({ limit: '25mb' }));
 
 const agent = new BaseAgent({ port: agentPort, label: agentLabel, publicEndpoint: agentPublicEndpoint });
 

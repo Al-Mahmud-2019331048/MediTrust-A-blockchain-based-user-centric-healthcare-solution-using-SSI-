@@ -1,5 +1,6 @@
 import { Express, Request, Response } from "express";
 import { BaseAgent } from "../../../shared/agent-base";
+import { generateId } from "../../../../crypto/encryption/src/hash-utils";
 
 // Registers all government (issuer) agent routes
 export function registerGovernmentRoutes(
@@ -16,6 +17,17 @@ export function registerGovernmentRoutes(
     const credDefId = getCredDefId();
     if (!credDefId) return res.status(400).send({ error: "credentialDefinitionId is required" });
 
+    // A stable identifier for this patient, independent of any specific
+    // DIDComm connection — Aries "Connections" mints a brand-new pairwise
+    // did:peer per connection, so `connectionId`/`theirDid` can't serve as a
+    // durable patient identity. Minted once here, embedded as a credential
+    // attribute so any verifier (e.g. a doctor requesting a proof later) can
+    // learn it cryptographically instead of the patient having to relay a
+    // DID by hand. Deliberately a plain opaque UUID, not e.g. nationalId —
+    // patientDID ends up as a plaintext LevelDB key prefix and backup
+    // folder name in the DWN, so a real PII value shouldn't be reused here.
+    const patientAccountId = generateId();
+
     const attributes = [
       { name: "name", value: `${name ?? "John Doe"}` },
       { name: "age", value: `${age ?? 30}` },
@@ -24,6 +36,7 @@ export function registerGovernmentRoutes(
       { name: "medicalCondition", value: `${medicalCondition ?? "None"}` },
       { name: "bloodType", value: `${bloodType ?? "O+"}` },
       { name: "emergencyContact", value: `${emergencyContact ?? "555-123-4567"}` },
+      { name: "patientAccountId", value: patientAccountId },
     ];
 
     try {
@@ -33,6 +46,7 @@ export function registerGovernmentRoutes(
         credentialId: result.id,
         message: "Identity credential issuance initiated",
         state: result.state,
+        patientAccountId,
       });
     } catch (error) {
       // W3C fallback
@@ -42,12 +56,12 @@ export function registerGovernmentRoutes(
           issuer: agentDid,
           issuanceDate: new Date().toISOString(),
           credentialSubject: {
-            id: connectionId,
+            id: patientAccountId,
             ...Object.fromEntries(attributes.map((a) => [a.name, a.value])),
           },
         };
         const w3cResult = await agent.sendMessage(connectionId, JSON.stringify(w3cCredential, null, 2));
-        return res.status(200).send({ success: true, credentialId: w3cResult.id, isW3C: true });
+        return res.status(200).send({ success: true, credentialId: w3cResult.id, isW3C: true, patientAccountId });
       } catch (_w3cError) {}
       res.status(500).send({ error: error.message });
     }
@@ -130,6 +144,62 @@ export function registerGovernmentRoutes(
     try {
       const result = await agent.getCredentialDefinition(credentialDefinitionId as string);
       res.status(200).send(result);
+    } catch (error) {
+      res.status(500).send({ error: error.message });
+    }
+  });
+}
+
+// Registers the government agent's hospital-authorization route — kept as a
+// separate exported function (not folded into registerGovernmentRoutes)
+// so server.ts explicitly wires it and it's easy to find/revert independently
+// of the identity-issuance routes above. Part of the 3-tier chain:
+// government issues this credential to the healthcare-authority agent, which
+// in turn issues doctors a ProfessionalRoleCredential.
+export function registerHospitalAuthorizationRoute(
+  app: Express,
+  agent: BaseAgent,
+  agentDid: string,
+  getHospitalCredDefId: () => string
+) {
+  // POST /issue-hospital-authorization — issues hospital authorization
+  // credential to the healthcare-authority agent (as holder). Falls back to
+  // a plain DIDComm message when the credential definition isn't real yet,
+  // same pattern as /issue-credential's W3C fallback.
+  app.post("/issue-hospital-authorization", async (req: Request, res: Response) => {
+    const { connectionId, institutionName, licenseNumber, authorizedAt } = req.body;
+
+    if (!connectionId) return res.status(400).send({ error: "connectionId is required" });
+    if (!institutionName || !licenseNumber) {
+      return res.status(400).send({ error: "institutionName and licenseNumber are required" });
+    }
+
+    const attributesData = {
+      institutionName,
+      licenseNumber,
+      authorizedAt: authorizedAt || new Date().toISOString(),
+    };
+
+    const credDefId = getHospitalCredDefId();
+    if (!credDefId || credDefId.startsWith("dummy-")) {
+      const w3cCredential = {
+        type: ["VerifiableCredential", "HospitalAuthorizationCredential"],
+        issuer: agentDid,
+        issuanceDate: new Date().toISOString(),
+        credentialSubject: { id: connectionId, ...attributesData },
+      };
+      try {
+        const w3cResult = await agent.sendMessage(connectionId, JSON.stringify(w3cCredential, null, 2));
+        return res.status(200).send({ success: true, credentialId: w3cResult.id, isW3C: true });
+      } catch (error) {
+        return res.status(500).send({ error: error.message });
+      }
+    }
+
+    try {
+      const attributes = Object.entries(attributesData).map(([name, value]) => ({ name, value: String(value) }));
+      const result = await agent.issueAnonCredsCredential(connectionId, credDefId, attributes);
+      res.status(200).send({ success: true, credentialId: result.id, state: result.state });
     } catch (error) {
       res.status(500).send({ error: error.message });
     }

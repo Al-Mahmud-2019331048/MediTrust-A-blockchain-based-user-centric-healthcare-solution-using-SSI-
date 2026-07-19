@@ -1,0 +1,93 @@
+{
+  "experiments": [
+    {
+      "name": "DWN storage overhead",
+      "metric": "ratio (encrypted footprint / plaintext bytes)",
+      "status": "ok",
+      "value": 1.351,
+      "detail": "plaintext=251B, encrypted footprint=339B"
+    },
+    {
+      "name": "Selective sharing overhead",
+      "metric": "ms (filtered read avg − full self-read avg)",
+      "status": "ok",
+      "value": -0.283,
+      "detail": "n=20 each; full self-read avg=1.571ms, Protocol-filtered read avg=1.289ms"
+    },
+    {
+      "name": "Access revocation time",
+      "metric": "seconds",
+      "status": "ok",
+      "value": 0.003459,
+      "detail": "revokeAccess call latency; subsequent read returned 403 (expected 403)"
+    },
+    {
+      "name": "SSS recovery time",
+      "metric": "ms",
+      "status": "ok",
+      "value": 0.221,
+      "detail": "reconstructKey() with 3 of 5 shares"
+    },
+    {
+      "name": "SSS split time (bonus)",
+      "metric": "ms",
+      "status": "ok",
+      "value": 0.087,
+      "detail": "splitMEK() into 5 shares, threshold 3"
+    },
+    {
+      "name": "Key recovery success rate",
+      "metric": "%",
+      "status": "ok",
+      "value": 100,
+      "detail": "10/10 valid-threshold reconstructions matched original; 10/10 insufficient-share attempts correctly threw"
+    },
+    {
+      "name": "Blockchain transaction latency",
+      "metric": "seconds",
+      "status": "blocked",
+      "detail": "Schema registration did not finish (likely ledger pool connectivity unavailable): {\"schemaMetadata\":{},\"registrationMetadata\":{},\"schemaState\":{\"state\":\"failed\",\"schema\":{\"name\":\"benchmark_schema_ad3b2898\",\"version\":\"1.0.0\",\"attrNames\":[\"field1\",\"field2\"],\"issuerId\":\"did:indy:bcovr"
+    },
+    {
+      "name": "VC issuance time",
+      "metric": "ms",
+      "status": "degraded",
+      "value": 32.818,
+      "detail": "AnonCreds issuance fell back to a plain W3C-shaped DIDComm message (ledger connectivity unavailable) — this timing is the fallback path, NOT a real ZKP-backed VC issuance"
+    },
+    {
+      "name": "VC verification time",
+      "metric": "ms",
+      "status": "blocked",
+      "detail": "No real AnonCreds credential was issued to verify against (issuance used the W3C fallback path — see VC issuance time result)"
+    }
+  ],
+  "attacks": [
+    {
+      "name": "1. Read record without a permission grant",
+      "passed": true,
+      "detail": "status=403, error=\"No active permission grant for this record\""
+    },
+    {
+      "name": "2. SSS reconstruction with only 2 shares",
+      "passed": true,
+      "detail": "At least 3 shares required to reconstruct the MEK, got 2"
+    },
+    {
+      "name": "3. MPOA recovery attempt before all 3 approvals",
+      "passed": true,
+      "detail": "status=403, error=\"Cannot reconstruct — request status is 'pending', must be 'approved'\""
+    },
+    {
+      "name": "4. Expired MPOA request reconstruction attempt",
+      "passed": true,
+      "detail": "status=403, error=\"Cannot reconstruct — request status is 'expired', must be 'approved'\""
+    },
+    {
+      "name": "5. Tampered audit entry verification",
+      "passed": true,
+      "detail": "genuine event verify()=true (expected true), tampered resourceId verify()=false (expected false)"
+    }
+  ],
+  "generatedAt": "2026-07-15T20:28:11.280Z"
+}

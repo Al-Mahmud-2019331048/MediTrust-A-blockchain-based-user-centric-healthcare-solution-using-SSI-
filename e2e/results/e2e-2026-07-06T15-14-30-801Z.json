@@ -1,0 +1,60 @@
+{
+  "steps": [
+    {
+      "step": "1. DID",
+      "status": "ok",
+      "detail": "Real, registered identities already exist: government=did:indy:bcovrin:test:734uMwddMmQ8WikLwkjw9E, doctor=did:indy:bcovrin:test:3zTsyNGwtXWjTP7DV4gxmR"
+    },
+    {
+      "step": "2. VC (identity issuance)",
+      "status": "degraded",
+      "detail": "Fell back to W3C message (ledger connectivity unavailable) — not a real ZKP-backed VC, see CLAUDE.md Known Constraints"
+    },
+    {
+      "step": "3. Doctor verifies + issues",
+      "status": "blocked",
+      "detail": "Issuance failed: {\"error\":\"Message is undeliverable to connection 3a359ea4-2ac5-4000-a0a5-5e189a25d836 (RoleProof Test Patient)\"}"
+    },
+    {
+      "step": "4. DWN write confirmation",
+      "status": "blocked",
+      "detail": "No record was written in step 3 to confirm"
+    },
+    {
+      "step": "5. shareRecord",
+      "status": "blocked",
+      "detail": "No patientDID established from step 3"
+    },
+    {
+      "step": "6. Selective read",
+      "status": "blocked",
+      "detail": "Prerequisite steps did not complete"
+    },
+    {
+      "step": "7a. Real proof exchange attempt",
+      "status": "blocked",
+      "detail": "Correctly did not verify within 8s — no real AnonCreds credential exists in the test wallet on this network (expected)"
+    },
+    {
+      "step": "7b. VP generation mechanism (synthetic proof)",
+      "status": "ok",
+      "detail": "VP generated and signed from a synthetic AnonCreds proof object (mechanism verified; not a live ZKP — see step 7a)"
+    },
+    {
+      "step": "8. revokeAccess",
+      "status": "blocked",
+      "detail": "Prerequisite steps did not complete"
+    },
+    {
+      "step": "9. Audit integrity",
+      "status": "blocked",
+      "detail": "No patientDID to check audit events for"
+    },
+    {
+      "step": "10. Integrity VC verification",
+      "status": "na",
+      "detail": "Not applicable — DWNRecord.integrityVCId is a documented, deferred placeholder (local-placeholder-{uuid}), not yet a real on-chain Indy VC. See CLAUDE.md Known Constraints."
+    }
+  ],
+  "generatedAt": "2026-07-06T15:14:30.801Z"
+}

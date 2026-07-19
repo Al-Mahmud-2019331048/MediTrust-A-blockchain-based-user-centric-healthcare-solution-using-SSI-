@@ -22,13 +22,14 @@ export function createProofStatusCache() {
     return count;
   };
 
-  // States that count as "verified" in the legacy PoC — kept here for reference
-  const VERIFIED_STATES = [
-    "done",
-    "presentation-received",
-    "request-received",
-    "presentation-sent",
-  ];
+  // Only "done" (RFC 0037's actual completion state) means a presentation was
+  // received AND cryptographically validated. The legacy PoC's list also
+  // included "request-received"/"presentation-sent"/"presentation-received" —
+  // all pre-verification protocol states reachable before any proof is ever
+  // checked — which let an unanswered or unvalidated proof request report as
+  // verified. Confirmed live: a proof request nobody ever responded to sat at
+  // "request-received" and was reported isVerified:true under the old list.
+  const VERIFIED_STATES = ["done"];
 
   const isVerifiedState = (state: string): boolean =>
     VERIFIED_STATES.includes(state);

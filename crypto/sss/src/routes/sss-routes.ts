@@ -1,11 +1,36 @@
 import { Router, Request, Response } from 'express';
 import { splitMEK } from '../key-splitter';
 import { reconstructKey } from '../key-reconstructor';
-import { initiateRecovery, approveRecovery, getRecoveryStatus } from '../mpoa-controller';
+import { initiateRecovery, approveRecovery, getRecoveryStatus, registerApproverKey, attachIssuedShares } from '../mpoa-controller';
 import { AuditService } from '../../../../audit/src/services/audit-service';
+import { attemptAnchor } from '../../../../audit/src/services/anchor-client';
+import { sha256String } from '../../../encryption/src/hash-utils';
 import { SSSShare } from '../../../../agents/shared/types';
 
 export const sssRouter = Router();
+
+// POST /sss/mpoa/register-key
+// Body: { patientDid, approverRole, publicKeyPem }
+// Out-of-band registration step, done once by the patient before any
+// recovery request exists (e.g. when they first set up a guardian/hospital
+// contact) — the same trust-on-first-use model already used for self-custody
+// share setup. approveRecovery() verifies every submitted approval's
+// signature against whatever key was registered here. This does NOT prove a
+// key really belongs to the real hospital/guardian in the world — that
+// binding needs a real institutional DID/credential, out of scope for this
+// PoC and accepted as a named limitation, not something this route solves.
+sssRouter.post('/mpoa/register-key', (req: Request, res: Response) => {
+  try {
+    const { patientDid, approverRole, publicKeyPem } = req.body;
+    if (!patientDid || !approverRole || !publicKeyPem) {
+      return res.status(400).json({ error: 'patientDid, approverRole, and publicKeyPem are required' });
+    }
+    registerApproverKey(patientDid, approverRole, publicKeyPem);
+    res.status(200).json({ success: true });
+  } catch (err: unknown) {
+    res.status(400).json({ error: (err as Error).message });
+  }
+});
 
 // POST /sss/split
 // Body: { mek: string }  — hex-encoded 32-byte key
@@ -52,6 +77,46 @@ sssRouter.post('/recovery/initiate', (req: Request, res: Response) => {
   }
 });
 
+// POST /sss/recovery/initiate-with-split
+// Body: { patientDid: string, mek: string (hex), expiryHours?: number }
+// Combines initiateRecovery() + splitMEK() and tags the resulting request
+// with the issued shareIds, closing the gap where a recovery request and the
+// Shamir shares meant to satisfy it were previously created independently
+// (via separate /recovery/initiate and /split calls) with nothing linking
+// them — reconstruct() could not tell "these shares belong to this approved
+// request" from "these are just 3+ valid-looking shares from anywhere".
+// Does not replace /split or /recovery/initiate — both are unchanged and
+// still usable standalone (e.g. by attack-simulation tests that only need a
+// bare pending/expired request with no real shares behind it).
+sssRouter.post('/recovery/initiate-with-split', async (req: Request, res: Response) => {
+  try {
+    const { patientDid, mek, expiryHours } = req.body;
+    if (!patientDid) return res.status(400).json({ error: 'patientDid is required' });
+    if (!mek || typeof mek !== 'string') return res.status(400).json({ error: 'mek (hex string) is required' });
+
+    const request = typeof expiryHours === 'number' ? initiateRecovery(patientDid, expiryHours) : initiateRecovery(patientDid);
+
+    const mekBuffer = Buffer.from(mek, 'hex');
+    const splitResult = await splitMEK(mekBuffer);
+    const shareIds = splitResult.shares.map((s) => s.shareId);
+    const taggedRequest = attachIssuedShares(request.requestId, shareIds);
+
+    await AuditService.record({
+      eventType: 'key_split',
+      actorDid: patientDid,
+      targetDid: patientDid,
+      resourceId: request.requestId,
+      resourceType: 'mek',
+      action: 'splitMEK',
+      metadata: { splitTimeMs: splitResult.splitTimeMs, total: splitResult.total, threshold: splitResult.threshold },
+    });
+
+    res.json({ ...taggedRequest, shares: splitResult.shares });
+  } catch (err: unknown) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
 // POST /sss/recovery/approve
 // Body: { requestId, approverDid, approverRole, signature }
 sssRouter.post('/recovery/approve', (req: Request, res: Response) => {
@@ -64,7 +129,14 @@ sssRouter.post('/recovery/approve', (req: Request, res: Response) => {
     const request = approveRecovery(requestId, approverDid, approverRole, signature);
     res.json(request);
   } catch (err: unknown) {
-    res.status(400).json({ error: (err as Error).message });
+    const message = (err as Error).message;
+    // Genuine authorization/verification failures get 403; everything else
+    // (bad requestId, expired/already-decided request, invalid role) is a
+    // 400 — matches this route's existing convention.
+    if (message.startsWith('Signature verification failed') || message.startsWith('No public key registered')) {
+      return res.status(403).json({ error: message });
+    }
+    res.status(400).json({ error: message });
   }
 });
 
@@ -92,9 +164,27 @@ sssRouter.post('/recovery/:requestId/reconstruct', async (req: Request, res: Res
       return res.status(400).json({ error: 'At least 3 shares required' });
     }
 
+    // Share-to-request provenance check: only enforced when this request was
+    // created via /recovery/initiate-with-split (issuedShareIds set). Requests
+    // created via the older bare /recovery/initiate have no known share
+    // manifest to check against, so they behave exactly as before. Without
+    // this check, any 3+ valid-looking Shamir shares — even from a
+    // completely unrelated split — would reconstruct successfully once THIS
+    // requestId reached 'approved', regardless of whether those specific
+    // shares were ever actually released for this recovery.
+    if (status.issuedShareIds && status.issuedShareIds.length > 0) {
+      const issued = new Set(status.issuedShareIds);
+      const unrecognized = shares.filter((s) => !issued.has(s.shareId));
+      if (unrecognized.length > 0) {
+        return res.status(403).json({
+          error: `Submitted share(s) do not belong to recovery request ${req.params.requestId}`,
+        });
+      }
+    }
+
     const { mek, reconstructTimeMs } = await reconstructKey(shares);
 
-    await AuditService.record({
+    const keyReconstructedEvent = await AuditService.record({
       eventType: 'key_reconstructed',
       actorDid: status.patientDid,
       targetDid: status.patientDid,
@@ -103,6 +193,13 @@ sssRouter.post('/recovery/:requestId/reconstruct', async (req: Request, res: Res
       action: 'reconstructKey',
       metadata: { reconstructTimeMs },
     });
+    // Fire-and-forget on-chain anchoring — NOT awaited before responding, so
+    // attemptAnchor()'s 5s timeout never adds latency to this request (a
+    // live regression run against the sibling permission-routes.ts callers
+    // caught the awaited version turning a ~5ms call into a ~5s one).
+    attemptAnchor(sha256String(keyReconstructedEvent.eventId + keyReconstructedEvent.signature))
+      .then((anchor) => AuditService.markAnchored(keyReconstructedEvent.eventId, anchor))
+      .catch(() => {});
 
     res.json({ mek: mek.toString('hex'), reconstructTimeMs });
   } catch (err: unknown) {

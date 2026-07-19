@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import { RecordsInterface, CreateRecordInput } from '../interfaces/records';
 import { PermissionsInterface } from '../interfaces/permissions';
 import { ProtocolsInterface } from '../interfaces/protocols';
+import { backupWrite } from '../backup/backup-service';
 import { AuditService } from '../../../../audit/src/services/audit-service';
 import { DWNRecord, Permission } from '../../../../agents/shared/types';
 
@@ -28,6 +29,19 @@ recordRouter.post('/storeRecord', async (req: Request, res: Response) => {
     }
 
     const isBinary = BINARY_CONTENT_TYPES.includes(contentType);
+    if (isBinary && typeof data === 'string') {
+      // Buffer.from(data, 'base64') silently DROPS invalid characters instead
+      // of throwing, so malformed input (e.g. stray spaces/symbols) gets
+      // silently decoded into different, corrupted bytes with no error
+      // anywhere — confirmed live via adversarial testing. Decoding then
+      // re-encoding and comparing against the (whitespace/padding-stripped)
+      // original catches this before it's ever persisted.
+      const stripPad = (s: string) => s.replace(/=+$/, '');
+      const reencoded = stripPad(Buffer.from(data, 'base64').toString('base64'));
+      if (reencoded !== stripPad(data.replace(/\s/g, ''))) {
+        return res.status(400).json({ error: 'data is not valid base64 for a binary contentType' });
+      }
+    }
     const normalizedData = isBinary
       ? Buffer.from(data, 'base64')
       : typeof data === 'string'
@@ -53,6 +67,16 @@ recordRouter.post('/storeRecord', async (req: Request, res: Response) => {
       resourceType: recordType,
       action: 'createRecord',
       metadata: { encryptTimeMs, wrapTimeMs, fileSize: record.fileSize, contentType },
+    });
+
+    // Operation Fullbring: incremental backup — fires right after this
+    // write succeeds, sending only this one new record (encrypted with the
+    // patient's own MEK) to the configured backup destination.
+    await backupWrite({
+      entityType: 'record',
+      patientDID,
+      entityKey: `record:${record.recordId}`,
+      entity: record,
     });
 
     res.status(201).json(record);

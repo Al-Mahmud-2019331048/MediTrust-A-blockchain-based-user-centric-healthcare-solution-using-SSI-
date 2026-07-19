@@ -1,8 +1,9 @@
 import { LevelDBAdapter } from '../storage/leveldb';
 import { generateId } from '../../../../crypto/encryption/src/hash-utils';
-import { signConsentReceipt } from '../../../../crypto/encryption/src/signing-utils';
+import { signWithPatientKey } from '../../../../crypto/encryption/src/signing-utils';
 import { Permission, DWNRecord } from '../../../../agents/shared/types';
 import { verifyActorRoleProof } from './role-verification';
+import { getOrCreateSigningKey } from '../encryption/patient-signing-key';
 
 const PERMISSION_KEY_PREFIX = 'permission:';
 
@@ -97,6 +98,14 @@ export class PermissionsInterface {
     if (!input.grantedToDID) throw new Error('grantedToDID is required');
     if (!input.recordType) throw new Error('recordType is required');
     if (!input.purpose) throw new Error('purpose is required');
+    // isActive()'s expiry check is `new Date() >= new Date(permission.expiresAt)`
+    // — comparing against an unparseable date produces NaN, and NaN
+    // comparisons are always false, so a garbage expiresAt silently made a
+    // grant permanently active (never expires) instead of erroring or being
+    // rejected. Confirmed live via adversarial testing.
+    if (input.expiresAt && isNaN(new Date(input.expiresAt).getTime())) {
+      throw new Error(`expiresAt is not a valid date: "${input.expiresAt}"`);
+    }
 
     if (input.actorRole) {
       if (!input.roleProofRecordId) {
@@ -116,15 +125,22 @@ export class PermissionsInterface {
     const now = new Date().toISOString();
     const expiresAt = input.expiresAt ?? null;
 
-    const consentVCId = signConsentReceipt({
-      consentId: permissionId,
-      patientDid: input.patientDID,
-      providerDid: input.grantedToDID,
-      resourceType: input.recordType,
-      grantedAt: now,
-      expiresAt: expiresAt ?? undefined,
-      purpose: input.purpose,
-    });
+    // Signed with the patient's own key (Operation Fullbring gap-closure),
+    // not a shared server-side secret — this now proves the patient
+    // themselves produced the receipt, not merely that the DWN process did.
+    const { privateKeyPem } = await getOrCreateSigningKey(input.patientDID);
+    const consentVCId = signWithPatientKey(
+      {
+        consentId: permissionId,
+        patientDid: input.patientDID,
+        providerDid: input.grantedToDID,
+        resourceType: input.recordType,
+        grantedAt: now,
+        expiresAt: expiresAt ?? undefined,
+        purpose: input.purpose,
+      },
+      privateKeyPem
+    );
 
     const permission: Permission = {
       permissionId,
@@ -179,8 +195,14 @@ export class PermissionsInterface {
           recordType: input.recordType,
           activeOnly: true,
         });
+        // Idempotent no-op — matches the permissionId path's own idempotency
+        // (re-revoking an already-revoked permissionId returns 200, not an
+        // error). Previously threw here, which the route mapped to a 404 —
+        // confirmed live that this made the SECOND of two sequential (or the
+        // losing side of concurrent) triple-revoke calls fail with an error
+        // even though the desired end-state (no active access) already held.
         if (matches.length === 0) {
-          throw new Error('No active permission found for the given patientDID/grantedToDID/recordType');
+          return { permissions: [], freshlyRevoked: [] };
         }
         const now = new Date().toISOString();
         for (const permission of matches) {

@@ -42,6 +42,20 @@ export interface TestConnection {
 // connection to actually complete. A single testPatient instance can hold
 // multiple simultaneous connections to different agents (normal DIDComm
 // behavior) — call this once per agent to connect to.
+//
+// Scoped to THIS call's own out-of-band invitation (via the shared
+// /connections?outOfBandId= filter agents/shared/common-routes.ts already
+// supports) rather than scanning the agent's entire connections list by
+// state alone. A long-lived agent process accumulates connections across
+// every test run against it (benchmark, e2e, ad-hoc adversarial scripts,
+// re-runs...) — an unfiltered scan can match an older, unrelated
+// already-`completed` connection instead of the one this call just
+// established, especially mid-poll while the new connection is still only
+// at `response-sent`. Confirmed live: with two connections on the same
+// doctor-agent process (one from an earlier adversarial test, one freshly
+// established by an e2e run), the old unfiltered scan picked the stale one
+// and the subsequent credential-issuance call failed as "undeliverable" to
+// a connection nothing was actually waiting on.
 export async function connectTestPatientTo(
   testPatient: BaseAgent,
   agentBaseUrl: string,
@@ -54,11 +68,12 @@ export async function connectTestPatientTo(
     body: JSON.stringify({ label, alias: `${label.toLowerCase().replace(/\s+/g, '-')}-${Date.now()}` }),
   });
   const invitation = await invRes.json();
+  const outOfBandId = invitation.invitation?.id;
 
   await testPatient.acceptInvitation({ invitationUrl: invitation.invitationUrl, label });
 
   const connection = await pollUntil(async () => {
-    const res = await fetch(`${agentBaseUrl}/connections`);
+    const res = await fetch(`${agentBaseUrl}/connections?outOfBandId=${outOfBandId}`);
     const conns: any[] = await res.json();
     return conns.find((c) => c.state === 'completed' || c.state === 'response-sent');
   }, timeoutMs);

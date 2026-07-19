@@ -9,24 +9,30 @@ export function registerVerifierRoutes(
   proofCache: ProofStatusCacheInstance
 ) {
   // GET /proof-data/:proofRecordId
+  // isVerified reflects the proof exchange record's REAL state (must be
+  // "done" — see cache-utils.ts's isVerifiedState), not merely whether
+  // getFormatData() returned a non-null object. getFormatData() returns the
+  // request's format data as soon as a request is sent, before any
+  // presentation exists — treating that as "verified" let an unanswered
+  // proof request report isVerified:true. This endpoint backs
+  // verifyActorRoleProof()'s trust decision for role-bound Permission
+  // grants, so it must reflect real cryptographic verification.
   app.get("/proof-data/:proofRecordId", async (req: Request, res: Response) => {
     const { proofRecordId } = req.params;
     if (!proofRecordId) return res.status(400).send({ error: "proofRecordId is required" });
 
     try {
-      const cached = proofCache.get(proofRecordId);
-      if (cached?.isVerified) {
-        const result = await agent.getProofData(proofRecordId);
-        return res.status(200).send({ ...result, isVerified: true, state: cached.state });
+      const proofRecords = await agent.getProofRecords(proofRecordId);
+      const proofRecord = proofRecords?.[0];
+      if (!proofRecord) {
+        return res.status(200).send({ isVerified: false });
       }
+
+      const isVerified = proofCache.isVerifiedState(proofRecord.state);
+      proofCache.update(proofRecordId, proofRecord.state, isVerified, proofRecord.connectionId);
 
       const result = await agent.getProofData(proofRecordId);
-      if (result) {
-        proofCache.update(proofRecordId, "done", true);
-        return res.status(200).send({ ...result, isVerified: true, state: "done" });
-      }
-
-      res.status(200).send({ isVerified: false });
+      res.status(200).send({ ...result, isVerified, state: proofRecord.state });
     } catch (error) {
       const cached = proofCache.get(proofRecordId);
       if (cached) {

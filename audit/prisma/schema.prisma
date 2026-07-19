@@ -22,6 +22,21 @@ model AuditLog {
   metadata     String?
   timestamp    DateTime @default(now())
   signature    String
+  // Present only when this event was signed with a patient's own key
+  // (Operation Fullbring gap-closure) rather than the shared
+  // AUDIT_SIGNING_SECRET — null for the ordinary system-signed path. Public
+  // keys aren't secret, so storing it directly on the row lets verify() work
+  // without depending on the DWN's LevelDB from another process.
+  signerPublicKey String?
+  // On-chain anchoring status (opt-in, only 5 patient-signed event types
+  // attempt this — see AuditService.markAnchored()). Written via a separate
+  // UPDATE after record()/signing already happened, so these fields are
+  // deliberately OUTSIDE the signed JWT payload and do not affect verify().
+  // Null on every row that never attempted anchoring.
+  anchorStatus    String?
+  ledgerTxnSeqNo  Int?
+  anchorError     String?
+  anchoredAt      DateTime?
 
   @@index([actorDid])
   @@index([targetDid])

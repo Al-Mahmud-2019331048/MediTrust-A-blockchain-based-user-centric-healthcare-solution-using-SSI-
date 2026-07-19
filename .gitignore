@@ -27,3 +27,12 @@ build/
 
 # LevelDB data (DWN patient node)
 dwn/patient-node/data/
+
+# Local backup destination (Operation Fullbring, BACKUP_DESTINATION=local default)
+dwn/patient-node/backup-storage/
+
+# LevelDB data (backup provider server)
+backup-provider/data/
+
+# Supervisor-provided Bifold debug APK (266MB, exceeds GitHub's 100MB file limit)
+base.apk

@@ -7,6 +7,21 @@ export interface StoreRecordInput {
   contentType: DWNRecord['contentType'];
   data: Record<string, unknown> | string;
   authorDID?: string;
+  // Original filename for binary contentTypes (PDF/image) — the DWN's own
+  // storeRecord route accepts this and stores it as DWNRecord.fileName;
+  // omitted (null on the DWN side) for JSON records.
+  fileName?: string;
+}
+
+// Thrown by both storeRecord() and queryRecords() for a non-2xx DWN
+// response. Carries the real HTTP status (e.g. 403 for "no permission
+// grant") so callers can distinguish "denied" from "unreachable" without
+// parsing the message string.
+export class DWNRequestError extends Error {
+  constructor(public readonly status: number, message: string) {
+    super(message);
+    this.name = 'DWNRequestError';
+  }
 }
 
 // Thin HTTP client wrapping the DWN's POST /storeRecord contract
@@ -32,8 +47,48 @@ export async function storeRecord(input: StoreRecordInput): Promise<DWNRecord> {
 
   if (!response.ok) {
     const body = await response.text();
-    throw new Error(`DWN storeRecord failed with status ${response.status}: ${body}`);
+    throw new DWNRequestError(response.status, `DWN storeRecord failed with status ${response.status}: ${body}`);
   }
 
   return (await response.json()) as DWNRecord;
+}
+
+export interface QueryRecordsInput {
+  requesterDID: string;
+  patientDID: string;
+  recordType?: DWNRecord['recordType'];
+}
+
+// A record as returned by GET /dwn/queryRecord: the encrypted fields are
+// replaced by a decrypted `data` (JSON object, or base64 for binary content),
+// possibly field-redacted per the requester's Permission/Protocol grant.
+export type ReadableDWNRecord = Omit<DWNRecord, 'encryptedData' | 'encryptedKey' | 'iv' | 'tag'> & {
+  data: Record<string, unknown> | string;
+  accessPolicy: Record<string, boolean>;
+};
+
+// Thin HTTP client wrapping the DWN's GET /queryRecord contract — the read
+// counterpart to storeRecord() above. Returns whatever the requester is
+// authorized to see (full record for a self-read, field-redacted otherwise);
+// a DWNRequestError with status 403 means the patient hasn't granted this
+// requesterDID access yet, not a broken connection.
+export async function queryRecords(input: QueryRecordsInput): Promise<ReadableDWNRecord[]> {
+  const baseUrl = (process.env.PATIENT_DWN_URL || 'http://localhost:5050').replace(/\/$/, '');
+  const params = new URLSearchParams({ requesterDID: input.requesterDID, patientDID: input.patientDID });
+  if (input.recordType) params.set('recordType', input.recordType);
+  const url = `${baseUrl}/dwn/queryRecord?${params.toString()}`;
+
+  let response: Response;
+  try {
+    response = await fetch(url);
+  } catch (err) {
+    throw new Error(`Failed to reach DWN at ${url}: ${(err as Error).message}`);
+  }
+
+  if (!response.ok) {
+    const body = await response.text();
+    throw new DWNRequestError(response.status, `DWN queryRecord failed with status ${response.status}: ${body}`);
+  }
+
+  return (await response.json()) as ReadableDWNRecord[];
 }

@@ -1,5 +1,6 @@
 import { Express, Request, Response } from "express";
 import { BaseAgent } from "../../../shared/agent-base";
+import { queryRecords, DWNRequestError } from "../../../shared/dwn-client";
 
 // Registers all pharmacist agent routes
 export function registerPharmacyRoutes(
@@ -23,7 +24,12 @@ export function registerPharmacyRoutes(
         version: "1.0",
         attributes: {
           identity_info: {
-            names: ["nationalId", "name", "medicalCondition", "bloodType"],
+            // patientAccountId is the stable identifier minted at identity
+            // issuance (government-agent's credential-routes.ts) — the same
+            // attribute doctor-agent's proof request reveals. Needed here so
+            // /read-prescription below can query the DWN by the patient's
+            // real patientDID instead of an ephemeral connection ID.
+            names: ["nationalId", "name", "medicalCondition", "bloodType", "patientAccountId"],
             restrictions: governmentCredDefId ? [{ cred_def_id: governmentCredDefId }] : [],
           },
         },
@@ -78,6 +84,33 @@ export function registerPharmacyRoutes(
       res.status(200).json({ success: true, proofRecordId: result.id, state: result.state });
     } catch (error) {
       res.status(500).json({ error: error.message });
+    }
+  });
+
+  // POST /read-prescription — reads the patient's prescription record(s)
+  // directly from their DWN, using PHARMACY_DID as the requester, instead of
+  // asking the wallet to present a ZKP proof (the /verify-prescription flow
+  // above). This exercises the DWN's own selective-sharing pathway
+  // (Permission.allowedFields, optionally capped by a Protocol) rather than
+  // the identity-layer ZKP one — the two are independent, both real. Requires
+  // the patient to have already granted PHARMACY_DID access to their
+  // 'prescription' records via the Patient Portal's Consent Manager; if not,
+  // the DWN's own 403 is passed straight through rather than masked as a 500.
+  app.post("/read-prescription", async (req: Request, res: Response) => {
+    const { patientDID } = req.body;
+    if (!patientDID) return res.status(400).json({ error: "patientDID is required" });
+
+    const pharmacyDID = process.env.PHARMACY_DID;
+    if (!pharmacyDID) return res.status(500).json({ error: "PHARMACY_DID is not configured" });
+
+    try {
+      const records = await queryRecords({ requesterDID: pharmacyDID, patientDID, recordType: "prescription" });
+      res.status(200).json({ records });
+    } catch (error) {
+      if (error instanceof DWNRequestError) {
+        return res.status(error.status).json({ error: error.message });
+      }
+      res.status(502).json({ error: (error as Error).message });
     }
   });
 }

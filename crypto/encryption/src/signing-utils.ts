@@ -6,11 +6,10 @@ dotenv.config();
 // Keep signing secrets for documents and audit logs separate
 const DOCUMENT_SIGNING_SECRET = process.env.DOCUMENT_SIGNING_SECRET;
 const AUDIT_SIGNING_SECRET = process.env.AUDIT_SIGNING_SECRET;
-const CONSENT_SIGNING_SECRET = process.env.CONSENT_SIGNING_SECRET;
 const VP_SIGNING_SECRET = process.env.VP_SIGNING_SECRET;
 
-if (!DOCUMENT_SIGNING_SECRET || !AUDIT_SIGNING_SECRET || !CONSENT_SIGNING_SECRET || !VP_SIGNING_SECRET) {
-  console.warn('⚠️  One or more signing secrets are not set in environment variables. Set DOCUMENT_SIGNING_SECRET, AUDIT_SIGNING_SECRET, CONSENT_SIGNING_SECRET, VP_SIGNING_SECRET.');
+if (!DOCUMENT_SIGNING_SECRET || !AUDIT_SIGNING_SECRET || !VP_SIGNING_SECRET) {
+  console.warn('⚠️  One or more signing secrets are not set in environment variables. Set DOCUMENT_SIGNING_SECRET, AUDIT_SIGNING_SECRET, VP_SIGNING_SECRET.');
 }
 
 export function signDocumentMetadata(payload: Record<string, unknown>): string {
@@ -33,14 +32,18 @@ export function verifyAuditEventSignature(token: string): Record<string, unknown
   return jwt.verify(token, AUDIT_SIGNING_SECRET) as Record<string, unknown>;
 }
 
-export function signConsentReceipt(payload: Record<string, unknown>): string {
-  if (!CONSENT_SIGNING_SECRET) throw new Error('CONSENT_SIGNING_SECRET is not set');
-  return jwt.sign(payload, CONSENT_SIGNING_SECRET, { expiresIn: '10y' });
+// Patient-owned-key signing (Operation Fullbring gap-closure) — used for
+// consent receipts and for audit events that represent an action the
+// patient (or their own device, acting immediately on self-custody) took
+// themselves, replacing what used to be a single shared CONSENT_SIGNING_SECRET
+// every patient's receipts were signed with. ES256 (ECDSA P-256), not Ed25519
+// — the installed jsonwebtoken@9's SUPPORTED_ALGS has no EdDSA entry.
+export function signWithPatientKey(payload: Record<string, unknown>, privateKeyPem: string): string {
+  return jwt.sign(payload, privateKeyPem, { algorithm: 'ES256', expiresIn: '10y' });
 }
 
-export function verifyConsentSignature(token: string): Record<string, unknown> {
-  if (!CONSENT_SIGNING_SECRET) throw new Error('CONSENT_SIGNING_SECRET is not set');
-  return jwt.verify(token, CONSENT_SIGNING_SECRET) as Record<string, unknown>;
+export function verifyWithPatientKey(token: string, publicKeyPem: string): Record<string, unknown> {
+  return jwt.verify(token, publicKeyPem, { algorithms: ['ES256'] }) as Record<string, unknown>;
 }
 
 export function signVerifiablePresentation(payload: Record<string, unknown>): string {

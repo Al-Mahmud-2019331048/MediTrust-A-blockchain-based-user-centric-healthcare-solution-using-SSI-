@@ -1,5 +1,6 @@
 import { LevelDBAdapter } from '../storage/leveldb';
 import { generateDataKey, encrypt, decrypt, wrapKey, unwrapKey } from '../encryption/aes-service';
+import { getOrCreateMEK, getExistingMEK } from '../encryption/mek-store';
 import { sha256, generateId } from '../../../../crypto/encryption/src/hash-utils';
 import { DWNRecord } from '../../../../agents/shared/types';
 
@@ -31,29 +32,6 @@ export interface DecryptRecordResult {
   decryptTimeMs: number;
 }
 
-/**
- * Reads a 32-byte base64-encoded key-encryption-key from DWN_MASTER_KEK.
- * Placeholder until patient wallet/DID work lands and a real per-patient
- * public key exists to wrap against (see CLAUDE.md Known Constraints) —
- * mirrors the throw-if-missing pattern used by signing-utils.ts's secrets.
- */
-function getPlaceholderKEK(): Buffer {
-  const raw = process.env.DWN_MASTER_KEK;
-  if (!raw) {
-    throw new Error(
-      'DWN_MASTER_KEK is not set. This is a placeholder key-encryption-key until ' +
-        'patient wallet/DID work lands. Generate one with: ' +
-        `node -e "console.log(require('crypto').randomBytes(32).toString('base64'))" ` +
-        'and set it in .env'
-    );
-  }
-  const kek = Buffer.from(raw, 'base64');
-  if (kek.length !== 32) {
-    throw new Error(`DWN_MASTER_KEK must decode to 32 bytes, got ${kek.length}`);
-  }
-  return kek;
-}
-
 export class RecordsInterface {
   static async createRecord(input: CreateRecordInput): Promise<CreateRecordResult> {
     if (!input.patientDID) throw new Error('patientDID is required');
@@ -69,8 +47,11 @@ export class RecordsInterface {
     const dataKey = generateDataKey();
     const { encryptedData, iv, tag, encryptTimeMs } = encrypt(plaintext, dataKey);
 
-    const kek = getPlaceholderKEK();
-    const { encryptedKey, wrapTimeMs } = wrapKey(dataKey, kek);
+    // Operation Fullbring: each patient gets their own real MEK (not one
+    // shared system-wide secret) — generated the first time this patientDID
+    // is ever seen, which is also this patient's onboarding moment.
+    const { mek } = await getOrCreateMEK(input.patientDID);
+    const { encryptedKey, wrapTimeMs } = wrapKey(dataKey, mek);
 
     const recordId = generateId();
     const now = new Date().toISOString();
@@ -133,8 +114,8 @@ export class RecordsInterface {
   }
 
   static async decryptRecord(record: DWNRecord): Promise<DecryptRecordResult> {
-    const kek = getPlaceholderKEK();
-    const { dataKey, unwrapTimeMs } = unwrapKey(record.encryptedKey, kek);
+    const mek = await getExistingMEK(record.patientDID);
+    const { dataKey, unwrapTimeMs } = unwrapKey(record.encryptedKey, mek);
     const { plaintext, decryptTimeMs } = decrypt(
       { encryptedData: record.encryptedData, iv: record.iv, tag: record.tag },
       dataKey

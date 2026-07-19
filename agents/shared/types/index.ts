@@ -91,7 +91,9 @@ export type AuditEventType =
     | 'key_reconstructed'
     | 'protocol_registered'
     | 'protocol_updated'
-    | 'vp_generated';
+    | 'vp_generated'
+    | 'dwn_restored'
+    | 'backup_integrity_check_failed';
 
 export interface SSSShare {
     shareId: string;
@@ -114,6 +116,10 @@ export interface RecoveryRequest {
     expiresAt: string;
     approvals: MPOAApproval[];
     status: 'pending' | 'approved' | 'rejected' | 'expired';
+    // shareIds of the specific 5-way split issued for this request (via /recovery/initiate-with-split).
+    // Unset for requests created via the older bare /recovery/initiate — reconstruct() skips the
+    // share-provenance check in that case, preserving prior behavior.
+    issuedShareIds?: string[];
 }
 
 export interface EncryptedPayload {

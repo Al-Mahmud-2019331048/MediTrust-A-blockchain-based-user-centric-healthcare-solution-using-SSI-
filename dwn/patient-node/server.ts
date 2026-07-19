@@ -2,12 +2,25 @@ import dotenv from 'dotenv';
 dotenv.config();
 
 import express, { Request, Response, NextFunction } from 'express';
+import cors from 'cors';
 import { recordRouter } from './src/routes/record-routes';
 import { permissionRouter } from './src/routes/permission-routes';
 import { protocolRouter } from './src/routes/protocol-routes';
+import { selfCustodyRouter } from './src/routes/self-custody-routes';
+import { mpoaBridgeRouter } from './src/routes/mpoa-bridge-routes';
+import { restoreRouter } from './src/routes/restore-routes';
 import { LevelDBAdapter } from './src/storage/leveldb';
 
 const app = express();
+// Originally this server had no CORS handling at all — every caller was an
+// agent doing a server-to-server call (agents/shared/dwn-client.ts), never a
+// browser. That assumption broke once the Patient Dashboard
+// (apps/web/src/services/dwnService.ts) started calling the DWN directly
+// from client-side JS: without CORS headers, the browser silently blocks
+// reading the response, which surfaces to the user as a generic "failed to
+// fetch" with no useful detail. Same permissive, no-auth trust boundary as
+// everywhere else in this local PoC (see CLAUDE.md's PATIENT_DWN_URL note).
+app.use(cors());
 // Default Express JSON limit (100kb) is too small for base64-encoded
 // images/PDFs that storeRecord accepts inline in the request body.
 app.use(express.json({ limit: '25mb' }));
@@ -22,6 +35,9 @@ app.get('/health', (_req: Request, res: Response) => {
 app.use('/dwn', recordRouter);
 app.use('/dwn', permissionRouter);
 app.use('/dwn/protocols', protocolRouter);
+app.use('/dwn', selfCustodyRouter);
+app.use('/dwn', mpoaBridgeRouter);
+app.use('/dwn', restoreRouter);
 
 app.use((_req: Request, res: Response) => {
   res.status(404).json({ error: 'Not found' });

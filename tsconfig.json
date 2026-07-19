@@ -8,13 +8,7 @@
     "allowSyntheticDefaultImports": true,
     "jsx": "react-jsx",
     "strict": false,
-    "skipLibCheck": true,
-    "paths": {
-      "next": ["./interface/node_modules/next"],
-      "next/*": ["./interface/node_modules/next/*"],
-      "qrcode.react": ["./interface/node_modules/qrcode.react"],
-      "qrcode": ["./interface/node_modules/qrcode"]
-    }
+    "skipLibCheck": true
   },
   "include": [
     "agents/**/*",
@@ -23,7 +17,7 @@
     "dwn/**/*",
     "benchmark/**/*",
     "e2e/**/*",
-    "apps/web/**/*"
+    "backup-provider/**/*"
   ],
-  "exclude": ["demo", "interface", "**/node_modules"]
+  "exclude": ["demo", "interface", "apps/web", "**/node_modules"]
 }

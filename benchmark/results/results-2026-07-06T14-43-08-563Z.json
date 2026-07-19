@@ -1,0 +1,89 @@
+{
+  "experiments": [
+    {
+      "name": "DWN storage overhead",
+      "metric": "ratio",
+      "status": "blocked",
+      "detail": "DWN not reachable at http://localhost:5050"
+    },
+    {
+      "name": "Selective sharing overhead",
+      "metric": "ms",
+      "status": "blocked",
+      "detail": "DWN not reachable at http://localhost:5050"
+    },
+    {
+      "name": "Access revocation time",
+      "metric": "seconds",
+      "status": "blocked",
+      "detail": "DWN not reachable at http://localhost:5050"
+    },
+    {
+      "name": "SSS recovery time",
+      "metric": "ms",
+      "status": "ok",
+      "value": 0.201,
+      "detail": "reconstructKey() with 3 of 5 shares"
+    },
+    {
+      "name": "SSS split time (bonus)",
+      "metric": "ms",
+      "status": "ok",
+      "value": 0.09,
+      "detail": "splitMEK() into 5 shares, threshold 3"
+    },
+    {
+      "name": "Key recovery success rate",
+      "metric": "%",
+      "status": "ok",
+      "value": 100,
+      "detail": "10/10 valid-threshold reconstructions matched original; 10/10 insufficient-share attempts correctly threw"
+    },
+    {
+      "name": "Blockchain transaction latency",
+      "metric": "seconds",
+      "status": "blocked",
+      "detail": "government-agent not reachable at http://localhost:4000"
+    },
+    {
+      "name": "VC issuance time",
+      "metric": "ms",
+      "status": "blocked",
+      "detail": "government-agent not reachable at http://localhost:4000"
+    },
+    {
+      "name": "VC verification time",
+      "metric": "ms",
+      "status": "blocked",
+      "detail": "government-agent not reachable at http://localhost:4000"
+    }
+  ],
+  "attacks": [
+    {
+      "name": "1. Read record without a permission grant",
+      "passed": false,
+      "detail": "DWN not reachable at http://localhost:5050"
+    },
+    {
+      "name": "2. SSS reconstruction with only 2 shares",
+      "passed": true,
+      "detail": "At least 3 shares required to reconstruct the MEK, got 2"
+    },
+    {
+      "name": "3. MPOA recovery attempt before all 3 approvals",
+      "passed": false,
+      "detail": "SSS service not reachable at http://localhost:4008"
+    },
+    {
+      "name": "4. Expired MPOA request reconstruction attempt",
+      "passed": false,
+      "detail": "SSS service not reachable at http://localhost:4008"
+    },
+    {
+      "name": "5. Tampered audit entry verification",
+      "passed": true,
+      "detail": "genuine event verify()=true (expected true), tampered resourceId verify()=false (expected false)"
+    }
+  ],
+  "generatedAt": "2026-07-06T14:43:08.563Z"
+}

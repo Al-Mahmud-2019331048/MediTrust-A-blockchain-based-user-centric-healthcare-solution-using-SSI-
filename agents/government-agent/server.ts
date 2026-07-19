@@ -7,7 +7,8 @@ import { BaseAgent } from '../shared/agent-base';
 import { createProofStatusCache } from '../shared/cache-utils';
 import { registerCommonRoutes, AgentConfig } from '../shared/common-routes';
 import { registerDebugRoutes } from '../shared/debug-routes';
-import { registerGovernmentRoutes } from './src/routes/credential-routes';
+import { registerGovernmentRoutes, registerHospitalAuthorizationRoute } from './src/routes/credential-routes';
+import { registerAnchorRoutes } from './src/routes/anchor-routes';
 
 const apiPort = parseInt(process.env.GOVERNMENT_API_PORT || '4000');
 const agentPort = apiPort + 1;
@@ -46,7 +47,7 @@ app.listen(apiPort, async () => {
     const schemaResult = await agent.createSchema(agentDid, {
       name: 'patient_credential',
       version: `1.0.${Math.floor(Math.random() * 100)}`,
-      attrNames: ['name', 'age', 'email', 'nationalId', 'medicalCondition', 'bloodType', 'emergencyContact'],
+      attrNames: ['name', 'age', 'email', 'nationalId', 'medicalCondition', 'bloodType', 'emergencyContact', 'patientAccountId'],
       issuerId: agentDid,
     });
     if (schemaResult.schemaState.state !== 'finished') {
@@ -66,6 +67,43 @@ app.listen(apiPort, async () => {
     console.warn(`Government schema/credDef registration failed, routes will mount with a dummy id: ${(error as Error).message}`);
   }
 
+  // Government also registers a SECOND, independent schema + credential
+  // definition for the HospitalAuthorizationCredential it issues to the
+  // healthcare-authority agent (3-tier chain, closes the "no credential-
+  // backed proof a doctor is licensed" gap). Kept as its own separate
+  // try/catch block rather than a shared helper, matching this file's
+  // existing one-block-per-credential-type style, and so a failure in one
+  // registration doesn't couple to the other's control flow.
+  let hospitalAuthorizationCredDefId = 'dummy-credential-definition-id-for-hospital-authorization';
+  try {
+    const hospitalSchemaResult = await agent.createSchema(agentDid, {
+      name: 'hospital_authorization_credential',
+      version: `1.0.${Math.floor(Math.random() * 100)}`,
+      attrNames: ['institutionName', 'licenseNumber', 'authorizedAt'],
+      issuerId: agentDid,
+    });
+    if (hospitalSchemaResult.schemaState.state !== 'finished') {
+      throw new Error(`Schema registration did not finish: ${JSON.stringify(hospitalSchemaResult.schemaState)}`);
+    }
+    const hospitalCredDefResult = await agent.createCredentialDefinition(
+      agentDid,
+      hospitalSchemaResult.schemaState.schemaId,
+      'hospital_authorization_credential'
+    );
+    if (hospitalCredDefResult.credentialDefinitionState.state !== 'finished') {
+      throw new Error(`Cred def registration did not finish: ${JSON.stringify(hospitalCredDefResult.credentialDefinitionState)}`);
+    }
+    hospitalAuthorizationCredDefId = hospitalCredDefResult.credentialDefinitionState.credentialDefinitionId;
+    console.log(`Government hospital-authorization schema + credential definition registered: ${hospitalAuthorizationCredDefId}`);
+    console.log(
+      `NOTE: to let the healthcare-authority agent's role-proof flow reference this credDef, copy this id into ` +
+        `HOSPITAL_AUTHORIZATION_CRED_DEF_ID in .env — each agent is a separate process with its own env, so this ` +
+        `can't propagate automatically.`
+    );
+  } catch (error) {
+    console.warn(`Government hospital-authorization schema/credDef registration failed, routes will mount with a dummy id: ${(error as Error).message}`);
+  }
+
   const commonConfig: AgentConfig = {
     agentType: '--issuer', // literal string registerCommonRoutes/common-routes.ts branches on
     agentLabel,
@@ -74,6 +112,8 @@ app.listen(apiPort, async () => {
   };
 
   registerGovernmentRoutes(app, agent, agentDid, () => credentialDefinitionId);
+  registerHospitalAuthorizationRoute(app, agent, agentDid, () => hospitalAuthorizationCredDefId);
+  registerAnchorRoutes(app, agent, agentDid);
   registerCommonRoutes(app, agent, commonConfig, proofCache);
   registerDebugRoutes(app, agent, agentLabel, agentPublicEndpoint, apiPort, '--issuer', agentDid, credentialDefinitionId);
 

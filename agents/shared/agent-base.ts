@@ -20,6 +20,16 @@ import {
   WsOutboundTransport,
 } from "@credo-ts/core";
 import { agentDependencies, HttpInboundTransport } from "@credo-ts/node";
+import { IndyVdrPoolService } from "@credo-ts/indy-vdr";
+// Deep import, not from the package's public index — this is a real,
+// genuinely exported function (@credo-ts/indy-vdr/build/utils/sign.js), just
+// not re-exported from the package root. Deliberately used INSTEAD OF
+// casting IndyVdrApi's own (`private` in its .d.ts, but same underlying
+// logic) signRequest method to `any` — this repo's Code Quality Rules treat
+// suppressors as a last resort, and a real typed function was available
+// here, so no suppressor was actually needed.
+import { signRequest } from "@credo-ts/indy-vdr/build/utils/sign";
+import { AttribRequest } from "@hyperledger/indy-vdr-shared";
 import crypto from "crypto";
 import { AgentModules, baseAgentModule } from "./module/module-config";
 import {
@@ -257,6 +267,32 @@ export class BaseAgent {
         supportRevocation: false,
       },
     });
+  }
+
+  // Anchors a hash on the Indy ledger via a raw AttribRequest (self-attrib:
+  // targetDid === submitterDid) — used for on-chain audit-event anchoring.
+  // Never throws; the ledger validator pool is confirmed blocked on this
+  // dev network (same block affecting schema/credDef registration), so a
+  // real attempt here is expected to genuinely try, time out for that real
+  // reason, and report success:false — not a fabricated result. did must be
+  // this agent's own qualified DID (did:indy:bcovrin:test:...) — needed to
+  // resolve its verification key; the AttribRequest's own submitterDid/
+  // targetDid fields use the bare unqualified id, matching the raw ledger's
+  // convention (see getPublicDid/getEndpointsForDid in this same package).
+  public async anchorHash(did: string, hash: string): Promise<{ success: boolean; ledgerTxnSeqNo?: number; error?: string }> {
+    try {
+      const unqualifiedDid = did.split(':').pop() ?? did;
+      const request = new AttribRequest({ submitterDid: unqualifiedDid, targetDid: unqualifiedDid, hash });
+
+      const poolService = this.agent.dependencyManager.resolve(IndyVdrPoolService);
+      const { pool } = await poolService.getPoolForDid(this.agent.context, did);
+      const signedRequest = await signRequest(this.agent.context, pool, request, did);
+      const response = await pool.submitRequest(signedRequest);
+
+      return { success: true, ledgerTxnSeqNo: response.result.txnMetadata.seqNo };
+    } catch (error) {
+      return { success: false, error: (error as Error).message };
+    }
   }
 
   public async getCredentialDefinition(credentialDefinitionId?: string) {
