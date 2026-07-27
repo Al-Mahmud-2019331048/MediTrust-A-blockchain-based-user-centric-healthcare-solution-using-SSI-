@@ -6,8 +6,18 @@ import { AuditService } from '../../../../audit/src/services/audit-service';
 import { attemptAnchor } from '../../../../audit/src/services/anchor-client';
 import { sha256String } from '../../../../crypto/encryption/src/hash-utils';
 import { restoreSigningKey, getOrCreateSigningKey } from '../encryption/patient-signing-key';
+import { isValidPatientDID } from '../utils/validation';
 
 export const restoreRouter = Router();
+
+// See self-custody-routes.ts's identical guard for why this matters —
+// patientDID is used directly as a backup-destination scope key.
+restoreRouter.param('patientDID', (req: Request, res: Response, next, value: string) => {
+  if (!isValidPatientDID(value)) {
+    return res.status(400).json({ error: 'patientDID must be a valid UUID' });
+  }
+  next();
+});
 
 // POST /dwn/patients/:patientDID/restore-data
 // Run AFTER the patient's key has already been restored onto this device

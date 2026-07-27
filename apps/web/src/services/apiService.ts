@@ -90,6 +90,10 @@ export interface DocumentAttachment {
 export interface VerifiedPatientIdentity {
   patientDID?: string;
   identityVerified?: boolean;
+  // Required for identityVerified to actually be honored server-side —
+  // doctor-agent independently re-verifies this against its own proof
+  // records rather than trusting identityVerified as sent.
+  proofRecordId?: string;
 }
 
 export async function issueMedicalCredential(connectionId: string, doc: {
@@ -142,6 +146,11 @@ export async function sendProofRequest(agentType: AgentType, connectionId: strin
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ connectionId, proofRequestlabel, version: '1.0' }),
   });
+  // Without this check, a real server error (e.g. connection not yet fully
+  // established) parses as a body with no `id` field, and the caller
+  // (useProofVerification) silently polls forever until its own 120s
+  // timeout instead of surfacing the real error immediately.
+  if (!response.ok) throw new Error(`Server responded with ${response.status}: ${await response.text()}`);
   return response.json();
 }
 
@@ -200,6 +209,7 @@ export async function sendMessage(agentType: AgentType, connectionId: string, me
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ connectionId, message }),
   });
+  if (!response.ok) throw new Error(`Server responded with ${response.status}: ${await response.text()}`);
   return response.json();
 }
 
@@ -223,9 +233,13 @@ export async function getProofData(agentType: AgentType, proofRecordId: string) 
   const response = await fetch(`${AGENT_ENDPOINTS[agentType]}/proof-data/${proofRecordId}`);
   if (!response.ok) return null;
 
-  const data = await response.json();
-  if (data) data.isVerified = true;
-  return data;
+  // The server (verifier-routes.ts) already computes and includes a real
+  // isVerified field from the proof record's actual state — forcing it to
+  // true here unconditionally used to silently overwrite that with a false
+  // positive regardless of the real response. Not currently exploited (no
+  // caller reads this field today), but a real landmine for anything that
+  // starts trusting it.
+  return response.json();
 }
 
 export async function getAgentStatus(agentType: AgentType): Promise<{ agentDid?: string } | null> {

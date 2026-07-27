@@ -4,7 +4,8 @@ dotenv.config();
 import fs from 'fs';
 import path from 'path';
 import { AuditService } from '../audit/src/services/audit-service';
-import { createTestPatientAgent, connectTestPatientTo, pollUntil, isReachable, randomHex } from '../benchmark/test-patient-helper';
+import { createTestPatientAgent, connectTestPatientTo, pollUntil, isReachable, randomHex, shutdownAllTestPatients } from '../benchmark/test-patient-helper';
+import { extractRevealedAttributes } from '../agents/shared/proof-parser';
 
 const DWN_URL = (process.env.PATIENT_DWN_URL || 'http://localhost:5050').replace(/\/$/, '');
 const GOV_URL = `http://localhost:${process.env.GOVERNMENT_API_PORT || '4000'}`;
@@ -65,9 +66,21 @@ async function main() {
   }
 
   // ---------- Step 3: Doctor verifies + issues (medical credential) ----------
+  // patientDID is now derived from a REAL verified AnonCreds proof of the
+  // step-2 identity credential (patientAccountId, revealed to the doctor's
+  // proof request), not the old theirDid/connectionId placeholder — the
+  // latter is never UUID-shaped, so it's correctly rejected by the DWN's
+  // patientDID validation (added 2026-07-25, see CLAUDE.md Security Audit)
+  // and every downstream step would cascade-fail. doctorConnectionId is
+  // hoisted to function scope so step 7a can reuse the SAME connection
+  // instead of re-querying and picking whatever connection happens to be
+  // first in doctor-agent's full history (the exact stale-connection bug
+  // documented as still-open — reusing this ID here is the actual fix).
   let patientDID: string | undefined;
   let dwnRecordId: string | undefined;
   let originalDocumentData: Record<string, unknown> | undefined;
+  let doctorConnectionId: string | undefined;
+  let identityProofRecordId: string | undefined;
 
   if (!doctorUp) {
     steps.push({ step: '3. Doctor verifies + issues', status: 'blocked', detail: `doctor-agent not reachable at ${DOCTOR_URL}` });
@@ -77,6 +90,42 @@ async function main() {
     if (!doctorConnection) {
       steps.push({ step: '3. Doctor verifies + issues', status: 'blocked', detail: 'Connection to doctor-agent did not complete within 15s' });
     } else {
+      doctorConnectionId = doctorConnection.connectionId;
+
+      // Wait for the step-2 identity credential to actually land in the
+      // wallet before requesting a proof against it — sending the request
+      // too early is a real race (confirmed live 2026-07-25) that fails
+      // with "Unable to automatically select requested attributes."
+      let credentialReady = false;
+      for (let i = 0; i < 30; i++) {
+        const records: any[] = await testPatient.getIssuedCredentialRecords();
+        if (records.some((r) => r.state === 'done')) { credentialReady = true; break; }
+        await new Promise((r) => setTimeout(r, 500));
+      }
+
+      let verifiedPatientAccountId: string | undefined;
+      if (credentialReady) {
+        const proofRes = await fetch(`${DOCTOR_URL}/send-proof-request`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ proofRequestlabel: 'e2e-identity-verification', connectionId: doctorConnectionId }),
+        });
+        const proofBody = await proofRes.json();
+        if (proofBody?.id) {
+          identityProofRecordId = proofBody.id;
+          const verified = await pollUntil(async () => {
+            const statusRes = await fetch(`${DOCTOR_URL}/proof-status/${proofBody.id}`);
+            const status = await statusRes.json();
+            return status.isVerified ? status : undefined;
+          }, 20000, 500);
+          if (verified) {
+            const proofDataRes = await fetch(`${DOCTOR_URL}/proof-data/${proofBody.id}`);
+            const proofData = await proofDataRes.json();
+            verifiedPatientAccountId = extractRevealedAttributes(proofData).revealedAttributes.patientAccountId;
+          }
+        }
+      }
+
       originalDocumentData = {
         documentId: `e2e-doc-${randomHex(4)}`,
         documentType: 'medicalRecord',
@@ -85,31 +134,41 @@ async function main() {
         issuedBy: doctorDid || 'unknown',
         issuedAt: new Date().toISOString(),
       };
-      const issueRes = await fetch(`${DOCTOR_URL}/issue-medical-credential`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ connectionId: doctorConnection.connectionId, ...originalDocumentData }),
-        signal: AbortSignal.timeout(20000),
-      });
-      const issueBody = await issueRes.json();
 
-      if (!issueRes.ok || !issueBody.success) {
-        steps.push({ step: '3. Doctor verifies + issues', status: 'blocked', detail: `Issuance failed: ${JSON.stringify(issueBody).slice(0, 200)}` });
-      } else {
-        dwnRecordId = issueBody.dwnRecordId;
-        const degraded = issueBody.credentialType === 'StructuredMessage';
+      if (!verifiedPatientAccountId) {
         steps.push({
           step: '3. Doctor verifies + issues',
-          status: degraded ? 'degraded' : 'ok',
-          detail: degraded
-            ? `Fell back to W3C-style message (ledger connectivity unavailable), but DWN write still happened: dwnRecordId=${dwnRecordId}`
-            : `Real AnonCreds medical credential issued, dwnRecordId=${dwnRecordId}`,
+          status: 'blocked',
+          detail: `Identity proof did not verify or reveal patientAccountId (credentialReady=${credentialReady}) — cannot establish a real patientDID`,
         });
+      } else {
+        const issueRes = await fetch(`${DOCTOR_URL}/issue-medical-credential`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            connectionId: doctorConnectionId,
+            ...originalDocumentData,
+            patientDID: verifiedPatientAccountId,
+            proofRecordId: identityProofRecordId,
+          }),
+          signal: AbortSignal.timeout(20000),
+        });
+        const issueBody = await issueRes.json();
 
-        // Derive patientDID exactly as writeIssuedDocumentToDWN() does internally.
-        const connRes = await fetch(`${DOCTOR_URL}/connections?connectionId=${doctorConnection.connectionId}`);
-        const conns: any[] = await connRes.json();
-        patientDID = conns[0]?.theirDid || doctorConnection.connectionId;
+        if (!issueRes.ok || !issueBody.success) {
+          steps.push({ step: '3. Doctor verifies + issues', status: 'blocked', detail: `Issuance failed: ${JSON.stringify(issueBody).slice(0, 200)}` });
+        } else {
+          dwnRecordId = issueBody.dwnRecordId;
+          patientDID = verifiedPatientAccountId;
+          const degraded = issueBody.credentialType === 'StructuredMessage';
+          steps.push({
+            step: '3. Doctor verifies + issues',
+            status: degraded ? 'degraded' : 'ok',
+            detail: degraded
+              ? `Fell back to W3C-style message (ledger connectivity unavailable), but DWN write still happened: dwnRecordId=${dwnRecordId}, real verified patientDID=${patientDID}`
+              : `Real AnonCreds medical credential issued to a real, proof-verified patientDID=${patientDID}, dwnRecordId=${dwnRecordId}`,
+          });
+        }
       }
     }
   }
@@ -173,37 +232,43 @@ async function main() {
   }
 
   // ---------- Step 7: VP generation ----------
-  // 7a: attempt a real proof exchange — expected to correctly NOT verify,
-  // since the test-patient's wallet holds no real AnonCreds credential on
-  // this ledger-blocked network (identity issuance fell back to a message).
-  if (testPatient && doctorUp) {
+  // 7a: a second, independent real proof exchange on the SAME connection
+  // established in step 3 — deliberately reused rather than re-queried, so
+  // this can't pick up a stale, unrelated connection from doctor-agent's
+  // accumulated history across earlier runs (the exact bug this replaces;
+  // confirmed reproducing live 2026-07-25 with the old re-query approach).
+  // Expected to genuinely verify now: both the ledger-genesis fix
+  // (2026-07-22) and the AutoAcceptProof gap fix (2026-07-25, see CLAUDE.md)
+  // mean a real AnonCreds proof round trip actually completes in this
+  // environment — this step's old "should NOT verify" expectation predates
+  // both fixes and was itself stale.
+  if (testPatient && doctorConnectionId) {
     try {
-      const doctorConnRes = await fetch(`${DOCTOR_URL}/connections`);
-      const doctorConns: any[] = await doctorConnRes.json();
-      const doctorConn = doctorConns.find((c) => c.state === 'completed' || c.state === 'response-sent');
-      if (doctorConn) {
-        const proofRes = await fetch(`${DOCTOR_URL}/send-proof-request`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ proofRequestlabel: 'e2e-verification', connectionId: doctorConn.id }),
-        });
-        const proofBody = await proofRes.json();
-        const verified = await pollUntil(async () => {
-          const statusRes = await fetch(`${DOCTOR_URL}/proof-status/${proofBody.id}`);
-          const status = await statusRes.json();
-          return status.isVerified ? status : undefined;
-        }, 8000, 500);
-        steps.push({
-          step: '7a. Real proof exchange attempt',
-          status: 'blocked',
-          detail: verified
-            ? 'Unexpectedly verified — investigate, this should not happen without a real credential in the wallet'
-            : 'Correctly did not verify within 8s — no real AnonCreds credential exists in the test wallet on this network (expected)',
-        });
-      }
+      const proofRes = await fetch(`${DOCTOR_URL}/send-proof-request`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ proofRequestlabel: 'e2e-verification-7a', connectionId: doctorConnectionId }),
+      });
+      const proofBody = await proofRes.json();
+      const verified = proofBody?.id
+        ? await pollUntil(async () => {
+            const statusRes = await fetch(`${DOCTOR_URL}/proof-status/${proofBody.id}`);
+            const status = await statusRes.json();
+            return status.isVerified ? status : undefined;
+          }, 20000, 500)
+        : undefined;
+      steps.push({
+        step: '7a. Real proof exchange attempt',
+        status: verified ? 'ok' : 'blocked',
+        detail: verified
+          ? `Real AnonCreds proof verified on the same connection established in step 3 (id=${proofBody.id})`
+          : `Did not verify within 20s (id=${proofBody?.id ?? 'none'}) — unexpected given step 3 already verified a proof on this same connection`,
+      });
     } catch (err) {
       steps.push({ step: '7a. Real proof exchange attempt', status: 'blocked', detail: `${(err as Error).message}` });
     }
+  } else {
+    steps.push({ step: '7a. Real proof exchange attempt', status: 'blocked', detail: 'No doctor connection established in step 3 to reuse' });
   }
 
   // 7b: demonstrate the VP-generation mechanism itself with a synthetic proof
@@ -268,6 +333,8 @@ async function main() {
     detail: 'Not applicable — DWNRecord.integrityVCId is a documented, deferred placeholder (local-placeholder-{uuid}), not yet a real on-chain Indy VC. See CLAUDE.md Known Constraints.',
   });
 
+  await shutdownAllTestPatients();
+
   return finish();
 }
 
@@ -287,7 +354,9 @@ function finish() {
   console.log(`\nResults written to:\n  ${jsonPath}\n  ${mdPath}\n`);
   for (const s of steps) console.log(`${s.status.toUpperCase().padEnd(8)} ${s.step} — ${s.detail}`);
 
-  const hardFailures = steps.filter((s) => s.status === 'blocked' && !s.step.startsWith('7a')).length;
+  // 7a used to be deliberately expected to fail (pre-genesis-fix); it's now
+  // expected to pass like everything else, so it's no longer excluded here.
+  const hardFailures = steps.filter((s) => s.status === 'blocked').length;
   process.exit(hardFailures > 0 ? 1 : 0);
 }
 

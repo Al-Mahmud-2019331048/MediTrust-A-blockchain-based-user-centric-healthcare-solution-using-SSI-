@@ -5,6 +5,7 @@ import { AuditService } from '../../../../audit/src/services/audit-service';
 import { attemptAnchor } from '../../../../audit/src/services/anchor-client';
 import { sha256String } from '../../../../crypto/encryption/src/hash-utils';
 import { getOrCreateSigningKey } from '../encryption/patient-signing-key';
+import { isValidPatientDID } from '../utils/validation';
 
 export const permissionRouter = Router();
 
@@ -30,6 +31,11 @@ permissionRouter.post('/shareRecord', async (req: Request, res: Response) => {
       return res.status(400).json({
         error: 'patientDID, grantedToDID, recordType, and purpose are required',
       });
+    }
+    // See record-routes.ts's storeRecord for why this matters — patientDID
+    // becomes a backup-destination scope key.
+    if (!isValidPatientDID(patientDID)) {
+      return res.status(400).json({ error: 'patientDID must be a valid UUID' });
     }
 
     if (actorRole && !roleProofRecordId) {

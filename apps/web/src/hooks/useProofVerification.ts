@@ -75,5 +75,5 @@ export function useProofVerification(
     },
   });
 
-  return { state, proofData, error, requestVerification };
+  return { state, proofData, proofRecordId, error, requestVerification };
 }

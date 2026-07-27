@@ -1,0 +1,126 @@
+{
+  "experiments": [
+    {
+      "name": "DWN storage overhead",
+      "metric": "ratio",
+      "status": "blocked",
+      "detail": "DWN not reachable at http://localhost:5050"
+    },
+    {
+      "name": "Selective sharing overhead",
+      "metric": "ms",
+      "status": "blocked",
+      "detail": "DWN not reachable at http://localhost:5050"
+    },
+    {
+      "name": "Access revocation time",
+      "metric": "seconds",
+      "status": "blocked",
+      "detail": "DWN not reachable at http://localhost:5050"
+    },
+    {
+      "name": "SSS recovery time",
+      "metric": "ms",
+      "status": "ok",
+      "value": 0.197,
+      "detail": "reconstructKey() with 3 of 5 shares"
+    },
+    {
+      "name": "SSS split time (bonus)",
+      "metric": "ms",
+      "status": "ok",
+      "value": 0.09,
+      "detail": "splitMEK() into 5 shares, threshold 3"
+    },
+    {
+      "name": "Key recovery success rate",
+      "metric": "%",
+      "status": "ok",
+      "value": 100,
+      "detail": "10/10 valid-threshold reconstructions matched original; 10/10 insufficient-share attempts correctly threw"
+    },
+    {
+      "name": "Blockchain transaction latency",
+      "metric": "seconds",
+      "status": "ok",
+      "value": 1.706,
+      "detail": "Real schema registration on BCovrin (POST /create-schema)"
+    },
+    {
+      "name": "VC issuance time",
+      "metric": "ms",
+      "status": "ok",
+      "value": 294.135,
+      "detail": "Real AnonCreds credential issuance"
+    },
+    {
+      "name": "VC verification time",
+      "metric": "ms",
+      "status": "blocked",
+      "detail": "Proof verification did not complete within 20s"
+    },
+    {
+      "name": "Selective disclosure payload reduction",
+      "metric": "%",
+      "status": "ok",
+      "value": -214.87,
+      "detail": "Selective proof (3 attrs + age predicate): 19475 bytes. Full-reveal proof (all 8 attrs): 6185 bytes. Real AnonCreds presentations fetched via /proof-data."
+    },
+    {
+      "name": "Selective disclosure latency cost",
+      "metric": "ms",
+      "status": "ok",
+      "value": 1524.13,
+      "detail": "Selective request→verified: 9095.0ms. Full-reveal request→verified: 7570.9ms. Positive value = selective disclosure cost more."
+    },
+    {
+      "name": "Selective disclosure payload reduction (attribute count only, no predicate)",
+      "metric": "%",
+      "status": "ok",
+      "value": -215.94,
+      "detail": "Selective proof, no predicate (3 attrs only): 19541 bytes. Full-reveal proof (all 8 attrs): 6185 bytes. Isolates attribute-count reduction from predicate cost."
+    },
+    {
+      "name": "Selective disclosure latency cost (attribute count only, no predicate)",
+      "metric": "ms",
+      "status": "ok",
+      "value": -484.892,
+      "detail": "Selective (no predicate) request→verified: 7086.0ms. Full-reveal request→verified: 7570.9ms. Positive value = selective disclosure cost more."
+    },
+    {
+      "name": "Concurrent credential workflow scalability",
+      "metric": "concurrent workflows",
+      "status": "degraded",
+      "value": 0,
+      "detail": "Highest concurrency level with 0 failures and avg <1000ms: none. Set up 3/3 real connections+credentials. Per-level (real, uncapped latency, 90000ms timeout): 2: avg 7159.2ms, p95 7663ms | 3: avg 11287.9ms, p95 14141.5ms"
+    }
+  ],
+  "attacks": [
+    {
+      "name": "1. Read record without a permission grant",
+      "passed": false,
+      "detail": "DWN not reachable at http://localhost:5050"
+    },
+    {
+      "name": "2. SSS reconstruction with only 2 shares",
+      "passed": true,
+      "detail": "At least 3 shares required to reconstruct the MEK, got 2"
+    },
+    {
+      "name": "3. MPOA recovery attempt before all 3 approvals",
+      "passed": false,
+      "detail": "SSS service not reachable at http://localhost:4008"
+    },
+    {
+      "name": "4. Expired MPOA request reconstruction attempt",
+      "passed": false,
+      "detail": "SSS service not reachable at http://localhost:4008"
+    },
+    {
+      "name": "5. Tampered audit entry verification",
+      "passed": true,
+      "detail": "genuine event verify()=true (expected true), tampered resourceId verify()=false (expected false)"
+    }
+  ],
+  "generatedAt": "2026-07-24T18:26:11.259Z"
+}

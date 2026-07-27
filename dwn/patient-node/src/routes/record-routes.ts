@@ -5,6 +5,7 @@ import { ProtocolsInterface } from '../interfaces/protocols';
 import { backupWrite } from '../backup/backup-service';
 import { AuditService } from '../../../../audit/src/services/audit-service';
 import { DWNRecord, Permission } from '../../../../agents/shared/types';
+import { isValidPatientDID } from '../utils/validation';
 
 const BINARY_CONTENT_TYPES: DWNRecord['contentType'][] = [
   'application/pdf',
@@ -26,6 +27,14 @@ recordRouter.post('/storeRecord', async (req: Request, res: Response) => {
       return res.status(400).json({
         error: 'patientDID, recordType, protocol, contentType, and data are required',
       });
+    }
+    // patientDID is used directly as a backup-destination scope key
+    // (folder name / URL segment / query value) — an unvalidated value like
+    // "_protocols" (the reserved shared-bucket name) or ".."/"." would
+    // poison shared backup state or write outside the intended per-patient
+    // location. Must be the real UUID minted at identity issuance.
+    if (!isValidPatientDID(patientDID)) {
+      return res.status(400).json({ error: 'patientDID must be a valid UUID' });
     }
 
     const isBinary = BINARY_CONTENT_TYPES.includes(contentType);
@@ -211,20 +220,28 @@ recordRouter.get('/queryRecord', async (req: Request, res: Response) => {
         data = ProtocolsInterface.applyFieldFilter(data, effectiveAllowedFields);
       }
 
+      // accessPolicy reveals the patient's full consent graph (every DID
+      // with active access) — self-reads only (grant === null): the patient
+      // themselves. A non-self requester (a real grant object) must never
+      // see this — it would leak the identities of every OTHER party the
+      // patient has granted access to, to any single authorized grantee.
       // accessPolicy is DID-keyed (grantedToDID), not role-keyed like CLAUDE.md's
       // illustrative {"doctor": true} example — the schema has no role registry today.
-      const activeGrants = await PermissionsInterface.listPermissions({
-        patientDID: record.patientDID,
-        recordType: record.recordType,
-        activeOnly: true,
-      });
-      const accessPolicy = activeGrants.reduce(
-        (acc, permission) => ({ ...acc, [permission.grantedToDID]: true }),
-        {} as Record<string, boolean>
-      );
+      let accessPolicy: Record<string, boolean> | undefined;
+      if (grant === null) {
+        const activeGrants = await PermissionsInterface.listPermissions({
+          patientDID: record.patientDID,
+          recordType: record.recordType,
+          activeOnly: true,
+        });
+        accessPolicy = activeGrants.reduce(
+          (acc, permission) => ({ ...acc, [permission.grantedToDID]: true }),
+          {} as Record<string, boolean>
+        );
+      }
 
       const { encryptedData, encryptedKey, iv, tag, ...rest } = record;
-      results.push({ ...rest, data, accessPolicy });
+      results.push(accessPolicy ? { ...rest, data, accessPolicy } : { ...rest, data });
     }
 
     await AuditService.record({

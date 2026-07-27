@@ -5,8 +5,23 @@ import { AuditService } from '../../../../audit/src/services/audit-service';
 import { attemptAnchor } from '../../../../audit/src/services/anchor-client';
 import { getOrCreateSigningKey, hasSigningKey, getPublicKey } from '../encryption/patient-signing-key';
 import { sha256String } from '../../../../crypto/encryption/src/hash-utils';
+import { verifyMEKAgainstBackup } from '../backup/backup-service';
+import { isValidPatientDID } from '../utils/validation';
+import { isRateLimited } from '../utils/rate-limit';
 
 export const selfCustodyRouter = Router();
+
+// Applies to every route below with a :patientDID param — patientDID is
+// used directly as a backup-destination scope key (folder name / URL
+// segment / query value). An unvalidated value like "_protocols" (the
+// reserved shared-bucket name) or ".."/"." would poison shared backup state
+// or write outside the intended per-patient location.
+selfCustodyRouter.param('patientDID', (req: Request, res: Response, next, value: string) => {
+  if (!isValidPatientDID(value)) {
+    return res.status(400).json({ error: 'patientDID must be a valid UUID' });
+  }
+  next();
+});
 
 // POST /dwn/patients/:patientDID/self-custody/initiate
 // Fetches (or creates, on first use) this patient's real MEK and splits it
@@ -67,8 +82,44 @@ selfCustodyRouter.post('/patients/:patientDID/self-custody/restore', async (req:
       return res.status(400).json({ error: 'At least 2 self-custody shares are required' });
     }
 
+    // Each attempt triggers a real verifyMEKAgainstBackup() call, which
+    // hits backup-provider's own (unbounded, unpaginated) entry-listing
+    // endpoint — without this, an attacker who knows/guesses a patientDID
+    // could probe repeatedly with bogus shares to trigger unlimited
+    // full-history scans. Bounds the actual abuse vector (many attempts
+    // against the same patientDID) without needing to change
+    // backup-provider's own listing behavior.
+    if (isRateLimited(`self-custody-restore:${patientDID}`, 5, 60_000)) {
+      return res.status(429).json({ error: 'Too many recovery attempts for this patient — try again in a minute.' });
+    }
+
     const alreadyHadMEK = await hasMEK(patientDID);
     const { mek, reconstructTimeMs } = await reconstructMEKSelfCustody(shares);
+
+    // Verify the reconstructed key is actually correct before persisting it.
+    // combine() mathematically produces SOME 32-byte output from any shares
+    // of the right shape — it cannot detect bogus/mismatched shares on its
+    // own, so without this check any 2 syntactically-valid share blobs would
+    // silently overwrite (and destroy access to) this patient's real key.
+    // verifyMEKAgainstBackup() only rejects on a genuine decrypt failure
+    // (wrong key) — it does NOT reject just because the backup destination
+    // is unreachable or empty (see its own doc comment for why that
+    // distinction matters; conflating the two was tried and confirmed live
+    // to break legitimate recovery whenever backup-provider was down).
+    try {
+      const result = await verifyMEKAgainstBackup(patientDID, mek);
+      if (result === 'unreachable') {
+        return res.status(503).json({
+          error: 'Cannot verify the reconstructed key right now — the backup destination is unreachable. Try again once it is reachable.',
+        });
+      }
+    } catch {
+      return res.status(400).json({
+        error:
+          'The provided shares reconstructed a key that failed verification against this patient\'s backed-up data — recovery aborted, nothing was changed.',
+      });
+    }
+
     await restoreMEK(patientDID, mek);
 
     // Same patient-key signing as initiate above — but ONLY if a signing key

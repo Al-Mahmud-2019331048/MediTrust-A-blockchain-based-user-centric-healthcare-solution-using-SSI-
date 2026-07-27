@@ -44,14 +44,30 @@ export default function GovernmentPortal() {
       // PoC convenience: this assumes the browser generating the QR is also
       // the patient's own device — saving here means the Patient Dashboard
       // (same localStorage key) can pick it up automatically in that case.
+      // Only auto-save when nothing else is already saved, or it's the same
+      // patient being re-issued to — never silently overwrite a DIFFERENT
+      // patient's saved ID (found live 2026-07-25: issuing to a second
+      // patient in the same browser session used to clobber the first
+      // patient's saved ID with no warning, risking a shared/kiosk browser
+      // later showing the wrong patient's dashboard).
+      let skippedAutoSave = false;
       if (res.patientAccountId) {
-        localStorage.setItem('meditrust-patient-did', res.patientAccountId);
+        const existing = localStorage.getItem('meditrust-patient-did');
+        if (!existing || existing === res.patientAccountId) {
+          localStorage.setItem('meditrust-patient-did', res.patientAccountId);
+        } else {
+          skippedAutoSave = true;
+        }
       }
       setResult({
         success: true,
-        message: res.isW3C
-          ? 'Identity credential sent (structured message fallback — no live AnonCreds credDef on this network).'
-          : 'Identity credential issued via AnonCreds.',
+        message:
+          (res.isW3C
+            ? 'Identity credential sent (structured message fallback — no live AnonCreds credDef on this network).'
+            : 'Identity credential issued via AnonCreds.') +
+          (skippedAutoSave
+            ? ' Note: a different patient ID was already saved in this browser, so it was NOT auto-loaded into the Patient Portal — copy the ID below manually if needed.'
+            : ''),
         patientAccountId: res.patientAccountId,
       });
     } catch (err) {

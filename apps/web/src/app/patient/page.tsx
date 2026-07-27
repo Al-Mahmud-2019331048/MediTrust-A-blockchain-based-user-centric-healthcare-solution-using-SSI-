@@ -235,12 +235,25 @@ const HOLDER_INSTRUCTIONS: Record<SelfCustodyShare['holder'], string> = {
 
 function ShareCard({ share }: { share: SelfCustodyShare }) {
   const [copied, setCopied] = useState(false);
+  const [copyFailed, setCopyFailed] = useState(false);
   const text = JSON.stringify(share);
 
   const copy = async () => {
-    await navigator.clipboard.writeText(text);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+    // This share is security-sensitive recovery material the UI explicitly
+    // warns "won't be shown again" — a silent clipboard failure (denied
+    // permission, or an insecure-origin restriction, both plausible during
+    // phone/LAN testing over plain HTTP per this project's setup) must never
+    // look identical to a successful copy.
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopyFailed(false);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      setCopied(false);
+      setCopyFailed(true);
+      setTimeout(() => setCopyFailed(false), 3000);
+    }
   };
 
   return (
@@ -249,9 +262,11 @@ function ShareCard({ share }: { share: SelfCustodyShare }) {
         <p className="text-sm font-medium text-gray-800">{HOLDER_LABELS[share.holder]}</p>
         <button
           onClick={copy}
-          className="rounded-lg bg-violet-100 px-2.5 py-1 text-xs font-medium text-violet-700 transition-colors duration-200 hover:bg-violet-200"
+          className={`rounded-lg px-2.5 py-1 text-xs font-medium transition-colors duration-200 ${
+            copyFailed ? 'bg-red-100 text-red-700 hover:bg-red-200' : 'bg-violet-100 text-violet-700 hover:bg-violet-200'
+          }`}
         >
-          {copied ? 'Copied ✓' : 'Copy'}
+          {copyFailed ? 'Copy failed — select text below' : copied ? 'Copied ✓' : 'Copy'}
         </button>
       </div>
       <p className="mt-1 text-xs text-gray-500">{HOLDER_INSTRUCTIONS[share.holder]}</p>

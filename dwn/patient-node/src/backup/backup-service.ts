@@ -5,6 +5,7 @@ import { BackupDestination, BackupEntry } from './backup-destination';
 import { LocalBackupDestination } from './local-destination';
 import { GoogleDriveBackupDestination } from './google-drive-destination';
 import { DWNProviderBackupDestination } from './dwn-provider-destination';
+import { isValidPatientDID } from '../utils/validation';
 
 const SEQ_KEY_PREFIX = 'backup-seq:';
 
@@ -94,6 +95,14 @@ export async function backupWrite(input: BackupWriteInput): Promise<{ sequence: 
   if (input.entityType !== 'protocol' && !input.patientDID) {
     throw new Error('patientDID is required for record/permission backup entries');
   }
+  // Defense in depth (callers should already validate at the route layer):
+  // scope is used directly as a filesystem folder name / URL path segment /
+  // query filter value by the configured backup destination. An invalid
+  // patientDID here would either collide with the reserved PROTOCOL_BACKUP_BUCKET
+  // name or escape the intended per-patient location.
+  if (input.entityType !== 'protocol' && !isValidPatientDID(input.patientDID)) {
+    throw new Error(`Invalid patientDID for backup: ${input.patientDID}`);
+  }
 
   const sequence = await nextSequence(scope);
   const writtenAt = new Date().toISOString();
@@ -156,6 +165,10 @@ export interface RestoredEntity {
  * written into a fresh store. Does not touch any live store itself.
  */
 export async function gatherForRestore(patientDID: string, mek: Buffer): Promise<RestoredEntity[]> {
+  // Defense in depth — see backupWrite()'s identical check.
+  if (!isValidPatientDID(patientDID)) {
+    throw new Error(`Invalid patientDID for restore: ${patientDID}`);
+  }
   const destination = getDestination();
   const [patientEntries, protocolEntries] = await Promise.all([
     destination.listEntries(patientDID),
@@ -202,4 +215,82 @@ export async function gatherForRestore(patientDID: string, mek: Buffer): Promise
   }
 
   return restored;
+}
+
+export type MEKVerificationResult = 'verified' | 'no-data' | 'unreachable';
+
+/**
+ * Checks whether `mek` is genuinely this patient's real key by attempting to
+ * decrypt one real backed-up entry with it. Used by the key-recovery routes
+ * to reject bogus/mismatched recovery input before it can overwrite (and
+ * permanently destroy access to) the patient's real MEK — Shamir
+ * reconstruction mathematically produces SOME 32-byte output from any
+ * shares of the right shape, so it can't detect wrong/mismatched shares on
+ * its own.
+ *
+ * Three distinct outcomes, deliberately NOT collapsed into one boolean
+ * (confirmed live — collapsing them was tried twice and broke something
+ * different each time):
+ *  - 'verified': an encrypted entry decrypted successfully — `mek` is
+ *    definitely correct.
+ *  - 'no-data': the backup destination was reachable, but this patient has
+ *    zero encrypted entries — nothing real to verify against, and nothing
+ *    real to lose either, so safe to proceed.
+ *  - 'unreachable': the backup destination itself could not be reached.
+ *    Unlike backupWrite()'s writes (where a destination being down is
+ *    explicitly non-fatal to the primary operation), key recovery is
+ *    security-critical and irreversible — silently treating "couldn't
+ *    verify" the same as "verified" here would let an attacker bypass
+ *    verification entirely just by making the backup destination
+ *    unreachable (confirmed live: this is exactly what happened when this
+ *    case was first folded into a generic "skip verification" path). The
+ *    caller must fail closed on this outcome, not proceed.
+ * A genuine decrypt failure (wrong key, real entries existed) throws —
+ * callers must treat that as "this is not the real key" and reject.
+ */
+export async function verifyMEKAgainstBackup(patientDID: string, mek: Buffer): Promise<MEKVerificationResult> {
+  // Defense in depth — see backupWrite()'s identical check.
+  if (!isValidPatientDID(patientDID)) {
+    throw new Error(`Invalid patientDID for verification: ${patientDID}`);
+  }
+  const destination = getDestination();
+
+  let patientEntries: BackupEntry[];
+  try {
+    patientEntries = await destination.listEntries(patientDID);
+  } catch (err) {
+    console.warn(`verifyMEKAgainstBackup: backup destination unreachable for ${patientDID}: ${(err as Error).message}`);
+    return 'unreachable';
+  }
+
+  let encryptedEnvelope: BackupEnvelope | undefined;
+  for (const raw of patientEntries) {
+    let envelope: BackupEnvelope;
+    try {
+      envelope = JSON.parse(raw.content) as BackupEnvelope;
+    } catch {
+      continue;
+    }
+    // Only patient-scoped, MEK-encrypted entries (records/permissions/
+    // signing_key) can verify a key — protocols are unencrypted and shared
+    // across all patients, not something a MEK could ever decrypt.
+    if (envelope.encrypted) {
+      encryptedEnvelope = envelope;
+      break;
+    }
+  }
+
+  if (!encryptedEnvelope) {
+    // No encrypted entries exist for this patient yet — nothing real to
+    // verify against (and nothing real to lose either, if so).
+    return 'no-data';
+  }
+
+  // Let this throw on a genuine auth-tag mismatch — the caller must treat
+  // that as "this is not the real key" and reject the recovery attempt.
+  decrypt(
+    { encryptedData: encryptedEnvelope.encryptedData!, iv: encryptedEnvelope.iv!, tag: encryptedEnvelope.tag! },
+    mek
+  );
+  return 'verified';
 }

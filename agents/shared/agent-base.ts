@@ -31,6 +31,9 @@ import { IndyVdrPoolService } from "@credo-ts/indy-vdr";
 import { signRequest } from "@credo-ts/indy-vdr/build/utils/sign";
 import { AttribRequest } from "@hyperledger/indy-vdr-shared";
 import crypto from "crypto";
+import fs from "fs";
+import os from "os";
+import path from "path";
 import { AgentModules, baseAgentModule } from "./module/module-config";
 import {
   AcceptInvitationOptions,
@@ -150,6 +153,33 @@ export class BaseAgent {
     }
   }
 
+  // Not called by any of the 4 real, long-lived agents (they're meant to
+  // stay up) — for short-lived throwaway agents (benchmark/e2e's
+  // createTestPatientAgent) that previously had no way to clean up after
+  // themselves. Each agent gets a permanently-unique walletConfig.id
+  // (line ~69), and Askar persists every wallet to disk under
+  // ~/.afj/data/wallet/<id>/ regardless — with no cleanup, every
+  // benchmark/e2e run left new wallet files behind forever (confirmed live
+  // 2026-07-25: 73 accumulated test-patient wallets, 146MB). Gracefully
+  // shuts down the underlying Credo-TS agent first, then deletes its own
+  // wallet directory — never anyone else's, since the path is derived from
+  // this instance's own walletConfig.id, not a glob.
+  public async shutdown(): Promise<void> {
+    try {
+      await this.agent.shutdown();
+    } catch (e) {
+      console.warn(`shutdown: agent.shutdown() failed (continuing to wallet cleanup anyway): ${(e as Error).message}`);
+    }
+    const walletId = this.config.walletConfig?.id;
+    if (!walletId) return;
+    const walletDir = path.join(os.homedir(), ".afj", "data", "wallet", walletId);
+    try {
+      await fs.promises.rm(walletDir, { recursive: true, force: true });
+    } catch (e) {
+      console.warn(`shutdown: failed to remove wallet directory ${walletDir}: ${(e as Error).message}`);
+    }
+  }
+
   public async getWalletDids(method?: string): Promise<DidRecord[]> {
     return this.agent.dids.getCreatedDids({ method });
   }
@@ -206,6 +236,17 @@ export class BaseAgent {
       alias: options.alias || `alias-${uniqueId}`,
       multiUseInvitation: true,
       autoAcceptConnection: true,
+      // Connections-only, deliberately (2026-07-27) — matches the real
+      // device wallet's DIDDoc format. DidExchange was tried the same day
+      // to work around a freshly-built Bifold's DIDDoc @context
+      // incompatibility, but it made the genesis-patched original wallet
+      // also prefer DidExchange, which hits a separate bug in this
+      // Credo-TS version's DID-rotation "complete" message handling
+      // (CredoError: "Connection is missing in message context", confirmed
+      // live — the connection got stuck at response-sent forever). See
+      // CLAUDE.md's "Bifold Wallet Genesis Fix" section for the full story;
+      // re-add DidExchange only if testing against a current-upstream
+      // Bifold build again, and expect that bug in exchange.
       handshakeProtocols: [HandshakeProtocol.Connections],
     });
 
@@ -317,12 +358,21 @@ export class BaseAgent {
     });
   }
 
+  // `credentialIds` is not a real Credo-TS query key (CredentialsApi has no
+  // such filterable field) — findAllByQuery({ credentialIds: [...] }) always
+  // silently matched zero records rather than erroring. CredentialsApi.getById()
+  // is the actual way to look up one record; this always returned an array
+  // to keep existing callers (which do `records?.[0]`) working unchanged.
   public async getIssuedCredentialRecords(credentialExchangeRecordId?: string) {
-    return await this.agent.credentials.findAllByQuery(
-      credentialExchangeRecordId
-        ? { credentialIds: [credentialExchangeRecordId] }
-        : {}
-    );
+    if (!credentialExchangeRecordId) {
+      return await this.agent.credentials.findAllByQuery({});
+    }
+    try {
+      const record = await this.agent.credentials.getById(credentialExchangeRecordId);
+      return [record];
+    } catch {
+      return [];
+    }
   }
 
   public async sendProofRequest({
@@ -346,14 +396,44 @@ export class BaseAgent {
     });
   }
 
+  // Same bug as getIssuedCredentialRecords above: `proofIds` is not a real
+  // Credo-TS query key, so findAllByQuery({ proofIds: [...] }) always
+  // silently matched zero records — meaning /proof-data has always returned
+  // { isVerified: false } for every agent that mounts it (doctor, pharmacy),
+  // never the real presentation payload, since it hit getProofRecords()'s
+  // "no record found" early-return before ever reaching getProofData().
+  // ProofsApi.getById() is the real lookup method.
   public async getProofRecords(proofRecordId?: string) {
-    return await this.agent.proofs.findAllByQuery(
-      proofRecordId ? { proofIds: [proofRecordId] } : {}
-    );
+    if (!proofRecordId) {
+      return await this.agent.proofs.findAllByQuery({});
+    }
+    try {
+      const record = await this.agent.proofs.getById(proofRecordId);
+      return [record];
+    } catch {
+      return [];
+    }
   }
 
   public async getProofData(proofRecordId: string) {
     return await this.agent.proofs.getFormatData(proofRecordId);
+  }
+
+  // Holder-side auto-respond to a received proof REQUEST. Not called by any
+  // existing agent today — Credo-TS's AutoAcceptProof.ContentApproved (this
+  // project's configured mode, see module-config.ts) only auto-accepts a
+  // request that matches a proposal the holder previously sent
+  // (V2ProofProtocol.shouldAutoRespondToRequest returns false when there's
+  // no such proposal), which never applies to this project's bare
+  // verifier-initiated requests. A real human wallet (Bifold) works around
+  // this with a manual "Accept" tap; an automated holder (e.g. the
+  // benchmark/e2e test-patient agent) needs this explicit equivalent.
+  public async acceptProofRequest(proofRecordId: string) {
+    const requestedCredentials = await this.agent.proofs.selectCredentialsForRequest({ proofRecordId });
+    return await this.agent.proofs.acceptRequest({
+      proofRecordId,
+      proofFormats: requestedCredentials.proofFormats,
+    });
   }
 
   public async sendMessage(connectionId: string, message: string) {

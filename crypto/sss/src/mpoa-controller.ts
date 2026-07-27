@@ -1,7 +1,7 @@
 import crypto from 'crypto';
-import { generateId } from '../../encryption/src/hash-utils';
+import { generateId, sha256String } from '../../encryption/src/hash-utils';
 import { AuditService } from '../../../audit/src/services/audit-service';
-import { MPOAApproval, RecoveryRequest } from '../../../agents/shared/types';
+import { MPOAApproval, RecoveryRequest, SSSShare } from '../../../agents/shared/types';
 
 const REQUIRED_APPROVER_ROLES: MPOAApproval['approverRole'][] = [
   'patient',
@@ -174,15 +174,19 @@ export function approveRecovery(
   return { ...request };
 }
 
-// Tags a request with the shareIds of the specific split issued for it, so
-// reconstruct() can later verify submitted shares actually belong to THIS
-// request rather than any other valid-looking Shamir share set (e.g. a
-// different patient's split, or an older split for the same patient).
-export function attachIssuedShares(requestId: string, shareIds: string[]): RecoveryRequest {
+// Tags a request with the specific shares issued for it, so reconstruct()
+// can later verify submitted shares actually belong to THIS request rather
+// than any other valid-looking Shamir share set (e.g. a different patient's
+// split, or an older split for the same patient) — AND that each submitted
+// share's DATA wasn't swapped for something else while keeping a real,
+// publicly-visible shareId (shareIds are plaintext in this endpoint's own
+// response, so ID membership alone isn't enough; see reconstruct()).
+export function attachIssuedShares(requestId: string, shares: SSSShare[]): RecoveryRequest {
   const request = recoveryRequests.get(requestId);
   if (!request) throw new Error(`Recovery request ${requestId} not found`);
 
-  request.issuedShareIds = shareIds;
+  request.issuedShareIds = shares.map((s) => s.shareId);
+  request.issuedShareFingerprints = Object.fromEntries(shares.map((s) => [s.shareId, sha256String(s.shareData)]));
   recoveryRequests.set(requestId, request);
 
   return { ...request };
@@ -192,7 +196,12 @@ export function getRecoveryStatus(requestId: string): RecoveryRequest {
   const request = recoveryRequests.get(requestId);
   if (!request) throw new Error(`Recovery request ${requestId} not found`);
 
-  if (request.status === 'pending' && isExpired(request)) {
+  // Also check expiry once a request is 'approved', not just while
+  // 'pending' — expiresAt is meant to bound how long the WHOLE request stays
+  // usable, not just the window for collecting approvals. Without this, a
+  // request approved long ago (even months) would stay reconstructible
+  // forever, since nothing else ever re-checks the clock after approval.
+  if ((request.status === 'pending' || request.status === 'approved') && isExpired(request)) {
     request.status = 'expired';
     recoveryRequests.set(requestId, request);
   }

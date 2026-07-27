@@ -3,10 +3,22 @@ import { getOrCreateMEK, restoreMEK, hasMEK } from '../encryption/mek-store';
 import { AuditService } from '../../../../audit/src/services/audit-service';
 import { attemptAnchor } from '../../../../audit/src/services/anchor-client';
 import { sha256String } from '../../../../crypto/encryption/src/hash-utils';
+import { verifyMEKAgainstBackup } from '../backup/backup-service';
+import { isValidPatientDID } from '../utils/validation';
+import { isRateLimited } from '../utils/rate-limit';
 
 export const mpoaBridgeRouter = Router();
 
 const SSS_SERVICE_URL = process.env.SSS_SERVICE_URL || 'http://localhost:4008';
+
+// See self-custody-routes.ts's identical guard for why this matters —
+// patientDID is used directly as a backup-destination scope key.
+mpoaBridgeRouter.param('patientDID', (req: Request, res: Response, next, value: string) => {
+  if (!isValidPatientDID(value)) {
+    return res.status(400).json({ error: 'patientDID must be a valid UUID' });
+  }
+  next();
+});
 
 // POST /dwn/patients/:patientDID/mpoa/initiate-split
 // Bridges the DWN's real per-patient MEK to the EXISTING, unchanged
@@ -67,7 +79,34 @@ mpoaBridgeRouter.post('/patients/:patientDID/mpoa/complete-restore', async (req:
       return res.status(400).json({ error: `mek must decode to 32 bytes, got ${mek.length}` });
     }
 
+    // See self-custody-routes.ts's identical guard for why this matters.
+    if (isRateLimited(`mpoa-complete-restore:${patientDID}`, 5, 60_000)) {
+      return res.status(429).json({ error: 'Too many recovery attempts for this patient — try again in a minute.' });
+    }
+
     const alreadyHadMEK = await hasMEK(patientDID);
+
+    // Verify the submitted key is actually correct before persisting it.
+    // This route has no way to confirm the caller genuinely went through
+    // crypto/sss's gated reconstruct endpoint (see route comment above) —
+    // without this check, anyone could POST an arbitrary 32-byte hex value
+    // directly here and silently overwrite this patient's real key.
+    // verifyMEKAgainstBackup() only rejects on a genuine decrypt failure
+    // (wrong key) — it does NOT reject just because the backup destination
+    // is unreachable or empty (see its own doc comment).
+    try {
+      const result = await verifyMEKAgainstBackup(patientDID, mek);
+      if (result === 'unreachable') {
+        return res.status(503).json({
+          error: 'Cannot verify the submitted key right now — the backup destination is unreachable. Try again once it is reachable.',
+        });
+      }
+    } catch {
+      return res.status(400).json({
+        error: 'The provided key failed verification against this patient\'s backed-up data — recovery aborted, nothing was changed.',
+      });
+    }
+
     await restoreMEK(patientDID, mek);
 
     const keyReconstructedEvent = await AuditService.record({

@@ -70,5 +70,11 @@ export async function reconstructMEKSelfCustody(shares: SelfCustodyShare[]): Pro
   const reconstructed = await combine(shareArrays);
   const reconstructTimeMs = performance.now() - start;
 
+  // Asymmetric with splitMEKSelfCustody()'s own 32-byte check on the way in
+  // — combine() doesn't validate its output length.
+  if (reconstructed.length !== 32) {
+    throw new Error(`Reconstructed key has unexpected length (${reconstructed.length} bytes, expected 32)`);
+  }
+
   return { mek: Buffer.from(reconstructed), reconstructTimeMs };
 }

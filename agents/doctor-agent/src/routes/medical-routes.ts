@@ -2,6 +2,7 @@ import { Express, Request, Response } from "express";
 import { BaseAgent } from "../../../shared/agent-base";
 import { storeRecord, queryRecords, DWNRequestError } from "../../../shared/dwn-client";
 import { DWNRecord } from "../../../shared/types";
+import { extractRevealedAttributes } from "../../../shared/proof-parser";
 
 const BINARY_ATTACHMENT_CONTENT_TYPES: DWNRecord["contentType"][] = [
   "application/pdf",
@@ -90,6 +91,44 @@ export async function writeIssuedDocumentToDWN(
   }
 }
 
+// Independently verifies a claimed identityVerified/patientDID pair against
+// this agent's OWN real proof records, rather than trusting the client's
+// assertion — previously `identityVerified` and `patientDID` came straight
+// from req.body with nothing checking them, so any caller hitting this HTTP
+// API directly (bypassing the Doctor Portal's real verification step, e.g.
+// doctor/page.tsx's PatientVerificationPanel) could set
+// identityVerified: true and patientDID to any patient's account ID.
+// Requires the SAME proofRecordId the frontend already has from
+// useProofVerification — a request with no proofRecordId, a proofRecordId
+// for a different connection, a proof that never reached a real "done"
+// state (matches cache-utils.ts's VERIFIED_STATES), or a proof that didn't
+// reveal patientAccountId are all treated as unverified, same as the
+// existing manual-entry fallback.
+async function verifyIdentityProof(
+  agent: BaseAgent,
+  connectionId: string,
+  proofRecordId: unknown
+): Promise<{ verified: boolean; verifiedPatientDID?: string }> {
+  if (!proofRecordId || typeof proofRecordId !== "string") {
+    return { verified: false };
+  }
+  try {
+    const records = await agent.getProofRecords(proofRecordId);
+    const record = records?.[0];
+    if (!record || record.state !== "done" || record.connectionId !== connectionId) {
+      return { verified: false };
+    }
+    const proofData = await agent.getProofData(proofRecordId);
+    const { revealedAttributes } = extractRevealedAttributes(proofData);
+    if (!revealedAttributes.patientAccountId) {
+      return { verified: false };
+    }
+    return { verified: true, verifiedPatientDID: revealedAttributes.patientAccountId };
+  } catch {
+    return { verified: false };
+  }
+}
+
 // Registers all doctor agent routes
 export function registerDoctorRoutes(
   app: Express,
@@ -103,7 +142,7 @@ export function registerDoctorRoutes(
   // this route used to hard-400 here instead, a leftover from before Days
   // 16-17's fallback+DWN-write pattern existed, not a deliberate difference).
   app.post("/issue-medical-credential", async (req: Request, res: Response) => {
-    const { connectionId, documentId, documentType, documentHash, patientName, patientId, diagnosis, prescription, issuedBy, issuedAt, attachment, patientDID, identityVerified } = req.body;
+    const { connectionId, documentId, documentType, documentHash, patientName, patientId, diagnosis, prescription, issuedBy, issuedAt, attachment, patientDID, proofRecordId } = req.body;
 
     if (!connectionId) return res.status(400).json({ error: "connectionId is required" });
     if (!documentId || !documentType || !issuedBy || !issuedAt) {
@@ -115,6 +154,9 @@ export function registerDoctorRoutes(
       });
     }
 
+    const { verified: identityVerified, verifiedPatientDID } = await verifyIdentityProof(agent, connectionId, proofRecordId);
+    const effectivePatientDID = identityVerified ? verifiedPatientDID : patientDID;
+
     const documentData = {
       documentId,
       documentType,
@@ -125,12 +167,11 @@ export function registerDoctorRoutes(
       prescription: prescription || "Not specified",
       issuedBy,
       issuedAt,
-      // true only when patientDID came from a cryptographically verified
-      // proof against the patient's identity credential (Doctor Portal's
-      // verification step), false for a manually-typed fallback ID —
-      // downstream readers can tell these apart rather than treating every
-      // write as equally trustworthy.
-      identityVerified: Boolean(identityVerified),
+      // true only when the server independently confirmed patientDID via a
+      // real, verified AnonCreds proof on this connection (see
+      // verifyIdentityProof above) — false for a manually-typed fallback ID.
+      // Derived server-side, not trusted from the client.
+      identityVerified,
     };
 
     const credDefId = getCredDefId();
@@ -154,7 +195,7 @@ export function registerDoctorRoutes(
           "MedicalRecord",
           documentData,
           attachment,
-          patientDID
+          effectivePatientDID
         );
         return res.status(200).json({
           success: true,
@@ -170,7 +211,12 @@ export function registerDoctorRoutes(
     }
 
     try {
-      const attributes = Object.entries(documentData).map(([name, value]) => ({ name, value: String(value) }));
+      // identityVerified is DWN-record-only metadata, not part of the
+      // registered medical_document_credential schema's attrNames — sending
+      // it as an AnonCreds attribute makes Credo-TS reject the whole offer
+      // with a schema-mismatch error, so it's excluded here specifically.
+      const { identityVerified: _identityVerified, ...credentialAttributes } = documentData;
+      const attributes = Object.entries(credentialAttributes).map(([name, value]) => ({ name, value: String(value) }));
       const result = await agent.issueAnonCredsCredential(connectionId, credDefId, attributes);
       const { record, attachmentRecord, dwnWriteError } = await writeIssuedDocumentToDWN(
         agent,
@@ -180,7 +226,7 @@ export function registerDoctorRoutes(
         "MedicalRecord",
         documentData,
         attachment,
-        patientDID
+        effectivePatientDID
       );
       res.status(200).json({
         success: true,
@@ -197,7 +243,7 @@ export function registerDoctorRoutes(
 
   // POST /issue-prescription — simplified prescription issuance with message fallback
   app.post("/issue-prescription", async (req: Request, res: Response) => {
-    const { connectionId, patientName, patientId, diagnosis, prescription, documentId, attachment, patientDID, identityVerified } = req.body;
+    const { connectionId, patientName, patientId, diagnosis, prescription, documentId, attachment, patientDID, proofRecordId } = req.body;
 
     if (!connectionId) return res.status(400).json({ error: "connectionId is required" });
     if (attachment && !BINARY_ATTACHMENT_CONTENT_TYPES.includes(attachment.contentType)) {
@@ -205,6 +251,9 @@ export function registerDoctorRoutes(
         error: `attachment.contentType must be one of: ${BINARY_ATTACHMENT_CONTENT_TYPES.join(", ")}`,
       });
     }
+
+    const { verified: identityVerified, verifiedPatientDID } = await verifyIdentityProof(agent, connectionId, proofRecordId);
+    const effectivePatientDID = identityVerified ? verifiedPatientDID : patientDID;
 
     const credDefId = getCredDefId();
     if (!credDefId || credDefId.startsWith("dummy-")) {
@@ -218,7 +267,8 @@ export function registerDoctorRoutes(
         prescription: prescription || "Not specified",
         issuedBy: agentDid,
         issuedAt: new Date().toISOString(),
-        identityVerified: Boolean(identityVerified),
+        // Derived server-side — see verifyIdentityProof above.
+        identityVerified,
       };
       const msg = JSON.stringify({
         "@type": "https://didcomm.org/issue-credential/2.0/credential",
@@ -239,7 +289,7 @@ export function registerDoctorRoutes(
           "Prescription",
           documentData,
           attachment,
-          patientDID
+          effectivePatientDID
         );
         return res.status(200).json({
           success: true,
@@ -264,11 +314,15 @@ export function registerDoctorRoutes(
       prescription: prescription || "Not specified",
       issuedBy: agentDid,
       issuedAt: new Date().toISOString(),
-      identityVerified: Boolean(identityVerified),
+      // Derived server-side — see verifyIdentityProof above.
+      identityVerified,
     };
 
     try {
-      const attributes = Object.entries(documentData).map(([name, value]) => ({ name, value: String(value) }));
+      // See the matching comment in /issue-medical-credential above:
+      // identityVerified is DWN-only metadata, not a schema attribute.
+      const { identityVerified: _identityVerified, ...credentialAttributes } = documentData;
+      const attributes = Object.entries(credentialAttributes).map(([name, value]) => ({ name, value: String(value) }));
       const result = await agent.issueAnonCredsCredential(connectionId, credDefId, attributes);
       const { record, attachmentRecord, dwnWriteError } = await writeIssuedDocumentToDWN(
         agent,
@@ -278,7 +332,7 @@ export function registerDoctorRoutes(
         "Prescription",
         documentData,
         attachment,
-        patientDID
+        effectivePatientDID
       );
       res.status(200).json({
         success: true,

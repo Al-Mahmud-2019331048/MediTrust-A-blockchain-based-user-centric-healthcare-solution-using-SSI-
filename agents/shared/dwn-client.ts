@@ -64,7 +64,11 @@ export interface QueryRecordsInput {
 // possibly field-redacted per the requester's Permission/Protocol grant.
 export type ReadableDWNRecord = Omit<DWNRecord, 'encryptedData' | 'encryptedKey' | 'iv' | 'tag'> & {
   data: Record<string, unknown> | string;
-  accessPolicy: Record<string, boolean>;
+  // Only present on self-reads — the DWN omits this entirely for non-self/
+  // grant-based reads (e.g. every doctor-agent/pharmacy-agent queryRecords()
+  // call, which always reads as a third party) since it would otherwise
+  // leak the patient's full consent graph to whoever holds the grant.
+  accessPolicy?: Record<string, boolean>;
 };
 
 // Thin HTTP client wrapping the DWN's GET /queryRecord contract — the read

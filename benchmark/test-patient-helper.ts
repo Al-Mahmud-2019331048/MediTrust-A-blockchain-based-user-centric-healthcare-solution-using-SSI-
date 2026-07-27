@@ -38,8 +38,18 @@ export async function pollUntil<T>(fn: () => Promise<T | undefined>, timeoutMs: 
 // already-occupied port. The startup timeout below is the actual fix for
 // that failure mode — it can't be fixed inside Credo-TS itself, but a
 // hung init() can be bounded and surfaced clearly from here.
+// Tracks every test-patient agent created via this function, so callers can
+// clean them all up in one call at the end of their own main() (see
+// shutdownAllTestPatients below) regardless of which internal function
+// created them or which error path was hit — each gets a permanently-unique
+// Askar wallet persisted to disk (~/.afj/data/wallet/<id>/), and without
+// this every benchmark/e2e run left new wallet files behind forever
+// (confirmed live 2026-07-25: 73 accumulated, 146MB).
+const createdTestPatients: BaseAgent[] = [];
+
 export async function createTestPatientAgent(port = 4020, timeoutMs = 15000): Promise<BaseAgent> {
   const testPatient = new BaseAgent({ port, label: 'Test Patient', publicEndpoint: `http://localhost:${port}` });
+  createdTestPatients.push(testPatient);
   const timeout = new Promise<never>((_, reject) =>
     setTimeout(() => reject(new Error(
       `Test-patient agent failed to start within ${timeoutMs}ms on port ${port} — ` +
@@ -49,6 +59,22 @@ export async function createTestPatientAgent(port = 4020, timeoutMs = 15000): Pr
     )), timeoutMs)
   );
   await Promise.race([testPatient.init(), timeout]);
+
+  // Stands in for a human tapping "Accept" on a real wallet's proof-request
+  // screen — AutoAcceptProof.ContentApproved never auto-responds to a bare
+  // verifier-initiated request (see BaseAgent.acceptProofRequest), so
+  // without this every proof request sent to this test patient would sit at
+  // request-received forever.
+  testPatient.registerProofStateListener(async (proofRecord) => {
+    if (proofRecord.state === 'request-received') {
+      try {
+        await testPatient.acceptProofRequest(proofRecord.id);
+      } catch (err) {
+        console.log(`Test-patient agent failed to auto-accept proof request ${proofRecord.id}: ${(err as Error).message}`);
+      }
+    }
+  });
+
   return testPatient;
 }
 
@@ -97,4 +123,15 @@ export async function connectTestPatientTo(
   }, timeoutMs);
 
   return connection ? { connectionId: connection.id } : undefined;
+}
+
+// Call once, near the end of a script's main(), after every experiment/step
+// that might have called createTestPatientAgent() has finished (success or
+// failure). Shuts down and deletes the wallet for every test-patient created
+// via this module so far — see createTestPatientAgent's comment above for
+// why this matters. Safe to call even if some agents failed to fully
+// initialize (BaseAgent.shutdown() itself tolerates that).
+export async function shutdownAllTestPatients(): Promise<void> {
+  await Promise.all(createdTestPatients.map((agent) => agent.shutdown()));
+  createdTestPatients.length = 0;
 }

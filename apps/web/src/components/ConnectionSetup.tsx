@@ -21,22 +21,35 @@ const ConnectionSetup = ({ agentType, label, onConnected, isVerifier = false }: 
   const [timeLeft, setTimeLeft] = useState(180);
   const [scanning, setScanning] = useState(false);
 
-  const generateQR = async () => {
+  const generateQR = async (isStale: () => boolean) => {
     try {
       const data = await createInvitation(agentType, label, label);
+      if (isStale()) return; // effect was cleaned up (Strict Mode remount) — this invitation was superseded, don't display it
       const id = data.invitation?.id ?? data.invitation?.['@id'] ?? null;
       setOobId(id);
       if (data.connection_id) setConnectionId(data.connection_id);
 
       const url = data.invitationUrl ?? data.invitation_url;
       const dataUrl = await QRCode.toDataURL(url, { color: { dark: '#000000', light: '#f3f4f6' } });
+      if (isStale()) return;
       setQrCodeData(dataUrl);
     } catch (error) {
       console.error('Error creating invitation:', error);
     }
   };
 
-  useEffect(() => { generateQR(); }, []);
+  // React 18 Strict Mode (Next.js dev default) double-invokes mount effects,
+  // which used to create two separate invitations here — whichever network
+  // response resolved last silently overwrote the displayed QR/oobId with an
+  // invitation nobody scanned, while polling kept checking that orphaned one
+  // forever even after the real (first) invitation's connection completed.
+  // The `stale` flag ensures only the invocation that survives to the end
+  // (i.e. isn't cleaned up before its async work finishes) ever updates state.
+  useEffect(() => {
+    let stale = false;
+    generateQR(() => stale);
+    return () => { stale = true; };
+  }, []);
 
   // Poll for connection completion
   usePolling(

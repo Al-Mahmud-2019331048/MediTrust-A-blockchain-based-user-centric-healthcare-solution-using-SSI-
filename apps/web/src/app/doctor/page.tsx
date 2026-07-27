@@ -11,6 +11,11 @@ import type { DWNRecordSummary } from '@/services/dwnService';
 interface PatientIdentity {
   patientAccountId: string;
   identityVerified: boolean;
+  // The doctor-agent independently re-verifies this against its own proof
+  // records rather than trusting identityVerified as sent — required for
+  // identityVerified to actually be honored server-side; see
+  // agents/doctor-agent/src/routes/medical-routes.ts's verifyIdentityProof.
+  proofRecordId?: string;
   autoName?: string;
   autoPatientId?: string;
 }
@@ -59,7 +64,7 @@ function fileToBase64(file: File): Promise<string> {
 function PatientVerificationPanel({
   connectionId, onResolved,
 }: { connectionId: string; onResolved: (identity: PatientIdentity) => void }) {
-  const { state, proofData, error, requestVerification } = useProofVerification('doctor', connectionId);
+  const { state, proofData, proofRecordId, error, requestVerification } = useProofVerification('doctor', connectionId);
   const requestSent = useRef(false);
   const [manualId, setManualId] = useState('');
   const [showManual, setShowManual] = useState(false);
@@ -78,12 +83,13 @@ function PatientVerificationPanel({
         onResolved({
           patientAccountId: attrs.patientAccountId,
           identityVerified: true,
+          proofRecordId: proofRecordId ?? undefined,
           autoName: attrs.name,
           autoPatientId: attrs.nationalId,
         });
       }
     }
-  }, [state, proofData]);
+  }, [state, proofData, proofRecordId]);
 
   return (
     <div className="mb-6 rounded-xl border border-gray-100 bg-gray-50 p-4">
@@ -158,11 +164,19 @@ function PatientRecordsPanel({ patientDID }: { patientDID: string }) {
     getAgentStatus('doctor').then((status) => setDoctorDid(status?.agentDid ?? null));
   }, []);
 
-  const load = async () => {
+  // Accepts an explicit filter override so filter-chip clicks can pass the
+  // new value directly, instead of reading `filter` from closure state —
+  // setFilter() is async/batched, so reading `filter` right after calling it
+  // would still see the OLD value. Previously the chips only called
+  // setFilter() and never refetched at all, leaving the displayed records
+  // unfiltered (and visually inconsistent with the highlighted chip) until
+  // the separate "Refresh" button was clicked.
+  const load = async (filterOverride?: RecordTypeFilter) => {
+    const effectiveFilter = filterOverride ?? filter;
     setLoading(true);
     setError(null);
     try {
-      const result = await readPatientRecords(patientDID, filter === 'all' ? undefined : filter);
+      const result = await readPatientRecords(patientDID, effectiveFilter === 'all' ? undefined : effectiveFilter);
       setRecords(result);
     } catch (err) {
       setError((err as Error).message);
@@ -177,7 +191,10 @@ function PatientRecordsPanel({ patientDID }: { patientDID: string }) {
         {(['all', 'medical', 'prescription', 'lab_report'] as RecordTypeFilter[]).map((t) => (
           <button
             key={t}
-            onClick={() => setFilter(t)}
+            onClick={() => {
+              setFilter(t);
+              if (records) load(t);
+            }}
             className={`rounded-full px-3 py-1.5 text-xs font-medium transition-colors duration-200 ${
               filter === t ? 'bg-emerald-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
             }`}
@@ -186,7 +203,7 @@ function PatientRecordsPanel({ patientDID }: { patientDID: string }) {
           </button>
         ))}
         <button
-          onClick={load}
+          onClick={() => load()}
           disabled={loading}
           className="ml-auto rounded-lg bg-emerald-100 px-4 py-1.5 text-sm font-medium text-emerald-700 transition-colors duration-200 hover:bg-emerald-200 disabled:cursor-not-allowed disabled:opacity-60"
         >
@@ -276,7 +293,11 @@ export default function DoctorPortal() {
         };
       }
 
-      const identity = { patientDID: patientIdentity.patientAccountId, identityVerified: patientIdentity.identityVerified };
+      const identity = {
+        patientDID: patientIdentity.patientAccountId,
+        identityVerified: patientIdentity.identityVerified,
+        proofRecordId: patientIdentity.proofRecordId,
+      };
 
       const res =
         docType === 'medical'

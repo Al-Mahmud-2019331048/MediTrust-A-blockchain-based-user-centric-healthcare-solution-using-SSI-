@@ -1,0 +1,60 @@
+{
+  "steps": [
+    {
+      "step": "1. DID",
+      "status": "ok",
+      "detail": "Real, registered identities already exist: government=did:indy:bcovrin:test:734uMwddMmQ8WikLwkjw9E, doctor=did:indy:bcovrin:test:3zTsyNGwtXWjTP7DV4gxmR"
+    },
+    {
+      "step": "2. VC (identity issuance)",
+      "status": "ok",
+      "detail": "Real AnonCreds identity credential issued"
+    },
+    {
+      "step": "3. Doctor verifies + issues",
+      "status": "ok",
+      "detail": "Real AnonCreds medical credential issued, dwnRecordId=undefined"
+    },
+    {
+      "step": "4. DWN write confirmation",
+      "status": "blocked",
+      "detail": "No record was written in step 3 to confirm"
+    },
+    {
+      "step": "5. shareRecord",
+      "status": "blocked",
+      "detail": "Grant failed: {\"error\":\"patientDID must be a valid UUID\"}"
+    },
+    {
+      "step": "6. Selective read",
+      "status": "blocked",
+      "detail": "Prerequisite steps did not complete"
+    },
+    {
+      "step": "7a. Real proof exchange attempt",
+      "status": "blocked",
+      "detail": "Unexpectedly verified — investigate, this should not happen without a real credential in the wallet"
+    },
+    {
+      "step": "7b. VP generation mechanism (synthetic proof)",
+      "status": "ok",
+      "detail": "VP generated and signed from a synthetic AnonCreds proof object (mechanism verified; not a live ZKP — see step 7a)"
+    },
+    {
+      "step": "8. revokeAccess",
+      "status": "blocked",
+      "detail": "Prerequisite steps did not complete"
+    },
+    {
+      "step": "9. Audit integrity (positive case)",
+      "status": "ok",
+      "detail": "1 audit events recorded for this run's patientDID, all verify()=true (Day 18's attack sim already proved the tampered/negative case)"
+    },
+    {
+      "step": "10. Integrity VC verification",
+      "status": "na",
+      "detail": "Not applicable — DWNRecord.integrityVCId is a documented, deferred placeholder (local-placeholder-{uuid}), not yet a real on-chain Indy VC. See CLAUDE.md Known Constraints."
+    }
+  ],
+  "generatedAt": "2026-07-25T09:56:08.027Z"
+}

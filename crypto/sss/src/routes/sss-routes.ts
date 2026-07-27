@@ -98,8 +98,7 @@ sssRouter.post('/recovery/initiate-with-split', async (req: Request, res: Respon
 
     const mekBuffer = Buffer.from(mek, 'hex');
     const splitResult = await splitMEK(mekBuffer);
-    const shareIds = splitResult.shares.map((s) => s.shareId);
-    const taggedRequest = attachIssuedShares(request.requestId, shareIds);
+    const taggedRequest = attachIssuedShares(request.requestId, splitResult.shares);
 
     await AuditService.record({
       eventType: 'key_split',
@@ -164,24 +163,50 @@ sssRouter.post('/recovery/:requestId/reconstruct', async (req: Request, res: Res
       return res.status(400).json({ error: 'At least 3 shares required' });
     }
 
-    // Share-to-request provenance check: only enforced when this request was
-    // created via /recovery/initiate-with-split (issuedShareIds set). Requests
-    // created via the older bare /recovery/initiate have no known share
-    // manifest to check against, so they behave exactly as before. Without
-    // this check, any 3+ valid-looking Shamir shares — even from a
-    // completely unrelated split — would reconstruct successfully once THIS
-    // requestId reached 'approved', regardless of whether those specific
-    // shares were ever actually released for this recovery.
-    if (status.issuedShareIds && status.issuedShareIds.length > 0) {
-      const issued = new Set(status.issuedShareIds);
-      const unrecognized = shares.filter((s) => !issued.has(s.shareId));
-      if (unrecognized.length > 0) {
-        return res.status(403).json({
-          error: `Submitted share(s) do not belong to recovery request ${req.params.requestId}`,
-        });
-      }
+    // Share-to-request provenance check — REQUIRED, not conditional. Without
+    // a known share manifest to check against, any 3+ valid-looking Shamir
+    // shares (even from a completely unrelated split, or leftovers from a
+    // different patient's recovery) would reconstruct successfully once this
+    // requestId reached 'approved' — combine() has no way to detect
+    // mismatched shares on its own. Requests created via the real recovery
+    // path (/recovery/initiate-with-split, via the DWN's /mpoa/initiate-split
+    // bridge) always have issuedShareIds attached. Requests created via the
+    // bare /recovery/initiate have no manifest and are rejected here — that
+    // endpoint stays usable for status/expiry testing (attack-simulation
+    // tests only exercise the earlier status check, at line ~158, and never
+    // reach this far), but was never meant to support a real reconstruction.
+    if (!status.issuedShareIds || status.issuedShareIds.length === 0) {
+      return res.status(403).json({
+        error: `No share manifest recorded for recovery request ${req.params.requestId} — shares cannot be verified, reconstruction refused.`,
+      });
+    }
+    const issued = new Set(status.issuedShareIds);
+    const unrecognized = shares.filter((s) => !issued.has(s.shareId));
+    if (unrecognized.length > 0) {
+      return res.status(403).json({
+        error: `Submitted share(s) do not belong to recovery request ${req.params.requestId}`,
+      });
     }
 
+    // Data-integrity check, not just ID membership — shareIds are plaintext
+    // in this same router's /recovery/initiate-with-split response, so
+    // anyone who's seen that response could submit a real shareId paired
+    // with fabricated shareData. combine() would silently interpolate a
+    // plausible-but-wrong key from that — it has no way to detect a
+    // corrupted/substituted share on its own (it only rejects duplicate
+    // x-coordinates). Comparing each submitted share's actual bytes against
+    // the fingerprint recorded at split time closes that gap.
+    const fingerprints = status.issuedShareFingerprints ?? {};
+    const tampered = shares.filter((s) => fingerprints[s.shareId] !== sha256String(s.shareData));
+    if (tampered.length > 0) {
+      return res.status(403).json({
+        error: `Submitted share(s) do not match the data issued for recovery request ${req.params.requestId}`,
+      });
+    }
+
+    // reconstructKey() itself now validates the output is 32 bytes (see
+    // key-reconstructor.ts) — a length mismatch throws and is handled by
+    // this handler's outer catch block below.
     const { mek, reconstructTimeMs } = await reconstructKey(shares);
 
     const keyReconstructedEvent = await AuditService.record({

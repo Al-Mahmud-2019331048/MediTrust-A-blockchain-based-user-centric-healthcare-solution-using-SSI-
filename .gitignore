@@ -36,3 +36,6 @@ backup-provider/data/
 
 # Supervisor-provided Bifold debug APK (266MB, exceeds GitHub's 100MB file limit)
 base.apk
+
+# Bifold wallet fork (separate upstream project, built from source to test the genesis fix)
+wallet/

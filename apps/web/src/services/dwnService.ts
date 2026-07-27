@@ -14,7 +14,10 @@ export interface DWNRecordSummary {
   fileName: string | null;
   fileSize: number;
   data: unknown;
-  accessPolicy: Record<string, boolean>;
+  // Only present on self-reads (the patient reading their own record) —
+  // omitted for non-self/grant-based reads, since it would otherwise leak
+  // the identities of every other party with access to the patient.
+  accessPolicy?: Record<string, boolean>;
   createdAt: string;
   updatedAt: string;
 }

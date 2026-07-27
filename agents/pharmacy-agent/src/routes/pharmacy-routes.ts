@@ -13,7 +13,14 @@ export function registerPharmacyRoutes(
     const { connectionId } = req.body;
     if (!connectionId) return res.status(400).json({ error: "connectionId is required" });
 
-    const governmentCredDefId = process.env.ISSUER_CRED_DEF_ID || getCredDefId();
+    // Deliberately NOT `|| getCredDefId()` — that's this agent's OWN
+    // (pharmacy's, not even a real registered one — a hardcoded verifier-only
+    // placeholder) credDef, not government's. Falling back to it made the
+    // "no restriction" branch below unreachable whenever ISSUER_CRED_DEF_ID
+    // was unset, silently pointing the restriction at a credDef no wallet
+    // could ever match. Same bug, same fix, as agents/shared/common-routes.ts's
+    // --doctor branch (see CLAUDE.md Security Audit, confirmed live 2026-07-25).
+    const governmentCredDefId = process.env.ISSUER_CRED_DEF_ID;
 
     try {
       await agent.sendMessage(connectionId, "Please prepare to share your identity credentials.");

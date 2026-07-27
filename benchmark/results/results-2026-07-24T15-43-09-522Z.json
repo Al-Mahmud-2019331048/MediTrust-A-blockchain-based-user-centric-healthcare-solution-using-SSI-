@@ -1,0 +1,110 @@
+{
+  "experiments": [
+    {
+      "name": "DWN storage overhead",
+      "metric": "ratio",
+      "status": "blocked",
+      "detail": "DWN not reachable at http://localhost:5050"
+    },
+    {
+      "name": "Selective sharing overhead",
+      "metric": "ms",
+      "status": "blocked",
+      "detail": "DWN not reachable at http://localhost:5050"
+    },
+    {
+      "name": "Access revocation time",
+      "metric": "seconds",
+      "status": "blocked",
+      "detail": "DWN not reachable at http://localhost:5050"
+    },
+    {
+      "name": "SSS recovery time",
+      "metric": "ms",
+      "status": "ok",
+      "value": 0.199,
+      "detail": "reconstructKey() with 3 of 5 shares"
+    },
+    {
+      "name": "SSS split time (bonus)",
+      "metric": "ms",
+      "status": "ok",
+      "value": 0.093,
+      "detail": "splitMEK() into 5 shares, threshold 3"
+    },
+    {
+      "name": "Key recovery success rate",
+      "metric": "%",
+      "status": "ok",
+      "value": 100,
+      "detail": "10/10 valid-threshold reconstructions matched original; 10/10 insufficient-share attempts correctly threw"
+    },
+    {
+      "name": "Blockchain transaction latency",
+      "metric": "seconds",
+      "status": "ok",
+      "value": 1.618,
+      "detail": "Real schema registration on BCovrin (POST /create-schema)"
+    },
+    {
+      "name": "VC issuance time",
+      "metric": "ms",
+      "status": "ok",
+      "value": 318.718,
+      "detail": "Real AnonCreds credential issuance"
+    },
+    {
+      "name": "VC verification time",
+      "metric": "ms",
+      "status": "blocked",
+      "detail": "Proof verification did not complete within 20s"
+    },
+    {
+      "name": "Selective disclosure payload reduction",
+      "metric": "%",
+      "status": "blocked",
+      "detail": "One or both proof round trips did not verify within 20s"
+    },
+    {
+      "name": "Selective disclosure latency cost",
+      "metric": "ms",
+      "status": "blocked",
+      "detail": "One or both proof round trips did not verify within 20s"
+    },
+    {
+      "name": "Concurrent credential workflow scalability",
+      "metric": "concurrent workflows",
+      "status": "degraded",
+      "value": 0,
+      "detail": "Highest concurrency level with 0 failures and avg <1000ms: none. Set up 50/50 real connections+credentials. Per-level: 5: avg N/A, 5 failed | 10: avg N/A, 10 failed | 20: avg N/A, 20 failed | 30: avg N/A, 30 failed | 40: avg N/A, 40 failed | 50: avg N/A, 50 failed"
+    }
+  ],
+  "attacks": [
+    {
+      "name": "1. Read record without a permission grant",
+      "passed": false,
+      "detail": "DWN not reachable at http://localhost:5050"
+    },
+    {
+      "name": "2. SSS reconstruction with only 2 shares",
+      "passed": true,
+      "detail": "At least 3 shares required to reconstruct the MEK, got 2"
+    },
+    {
+      "name": "3. MPOA recovery attempt before all 3 approvals",
+      "passed": false,
+      "detail": "SSS service not reachable at http://localhost:4008"
+    },
+    {
+      "name": "4. Expired MPOA request reconstruction attempt",
+      "passed": false,
+      "detail": "SSS service not reachable at http://localhost:4008"
+    },
+    {
+      "name": "5. Tampered audit entry verification",
+      "passed": true,
+      "detail": "genuine event verify()=true (expected true), tampered resourceId verify()=false (expected false)"
+    }
+  ],
+  "generatedAt": "2026-07-24T15:43:09.522Z"
+}

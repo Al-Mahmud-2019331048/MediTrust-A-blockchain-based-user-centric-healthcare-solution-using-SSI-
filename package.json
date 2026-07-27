@@ -11,6 +11,8 @@
     "ha:dev": "tsx agents/healthcare-authority-agent/server.ts",
     "sss:dev": "tsx crypto/sss/server.ts",
     "backup-provider:dev": "tsx backup-provider/server.ts",
+    "dev:all": "bash scripts/start-all.sh",
+    "stop:all": "bash scripts/stop-all.sh",
     "benchmark": "tsx benchmark/run-experiments.ts",
     "e2e-test": "tsx e2e/full-flow-test.ts"
   },

@@ -17,5 +17,12 @@ export async function reconstructKey(shares: SSSShare[]): Promise<ReconstructRes
   const reconstructed = await combine(shareArrays);
   const reconstructTimeMs = performance.now() - start;
 
+  // Asymmetric with splitMEK()'s own 32-byte check on the way in — combine()
+  // doesn't validate its output length, so a mismatched/corrupted share set
+  // could otherwise hand back a wrong-length "key" with no error here.
+  if (reconstructed.length !== 32) {
+    throw new Error(`Reconstructed key has unexpected length (${reconstructed.length} bytes, expected 32)`);
+  }
+
   return { mek: Buffer.from(reconstructed), reconstructTimeMs };
 }

@@ -1,0 +1,60 @@
+{
+  "steps": [
+    {
+      "step": "1. DID",
+      "status": "ok",
+      "detail": "Real, registered identities already exist: government=did:indy:bcovrin:test:734uMwddMmQ8WikLwkjw9E, doctor=did:indy:bcovrin:test:3zTsyNGwtXWjTP7DV4gxmR"
+    },
+    {
+      "step": "2. VC (identity issuance)",
+      "status": "degraded",
+      "detail": "Fell back to W3C message (ledger connectivity unavailable) — not a real ZKP-backed VC, see CLAUDE.md Known Constraints"
+    },
+    {
+      "step": "3. Doctor verifies + issues",
+      "status": "degraded",
+      "detail": "Fell back to W3C-style message (ledger connectivity unavailable), but DWN write still happened: dwnRecordId=fac32f96-5c30-4d65-bce2-4edaa46c343c"
+    },
+    {
+      "step": "4. DWN write confirmation",
+      "status": "ok",
+      "detail": "Self-read confirms the record is genuinely in the DWN with matching data (recordId=fac32f96-5c30-4d65-bce2-4edaa46c343c)"
+    },
+    {
+      "step": "5. shareRecord",
+      "status": "ok",
+      "detail": "Granted did:e2e:insurer-b5404039 access to ['documentType','issuedBy'] only"
+    },
+    {
+      "step": "6. Selective read",
+      "status": "ok",
+      "detail": "Insurer sees only [documentType, issuedBy] as granted — diagnosis/prescription correctly redacted"
+    },
+    {
+      "step": "7a. Real proof exchange attempt",
+      "status": "blocked",
+      "detail": "Correctly did not verify within 8s — no real AnonCreds credential exists in the test wallet on this network (expected)"
+    },
+    {
+      "step": "7b. VP generation mechanism (synthetic proof)",
+      "status": "ok",
+      "detail": "VP generated and signed from a synthetic AnonCreds proof object (mechanism verified; not a live ZKP — see step 7a)"
+    },
+    {
+      "step": "8. revokeAccess",
+      "status": "ok",
+      "detail": "Read after revocation returned 403 (expected 403)"
+    },
+    {
+      "step": "9. Audit integrity (positive case)",
+      "status": "ok",
+      "detail": "5 audit events recorded for this run's patientDID, all verify()=true (Day 18's attack sim already proved the tampered/negative case)"
+    },
+    {
+      "step": "10. Integrity VC verification",
+      "status": "na",
+      "detail": "Not applicable — DWNRecord.integrityVCId is a documented, deferred placeholder (local-placeholder-{uuid}), not yet a real on-chain Indy VC. See CLAUDE.md Known Constraints."
+    }
+  ],
+  "generatedAt": "2026-07-19T17:26:49.280Z"
+}

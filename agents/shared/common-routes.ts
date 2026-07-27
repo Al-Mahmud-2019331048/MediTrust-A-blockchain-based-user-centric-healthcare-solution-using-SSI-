@@ -17,7 +17,7 @@ export function registerCommonRoutes(
 ) {
   // POST /send-proof-request — attributes/predicates differ per agent type
   app.post("/send-proof-request", async (req: Request, res: Response) => {
-    const { proofRequestlabel, connectionId, version } = req.body;
+    const { proofRequestlabel, connectionId, version, revealAll, noPredicate } = req.body;
 
     if (!proofRequestlabel) return res.status(400).send({ error: "proofRequestlabel is required" });
     if (!connectionId) return res.status(400).send({ error: "connectionId is required" });
@@ -25,23 +25,52 @@ export function registerCommonRoutes(
     let requestAttributes: Record<string, any> = {};
     let requestPredicates: Record<string, any> = {};
 
-    if (config.agentType === "--issuer") {
+    if (config.agentType === "--issuer" && revealAll) {
+      // Full-attribute reveal, no predicate — the "full credential
+      // presentation" baseline used by the selective-disclosure benchmark
+      // to compare payload size/latency against the normal 3-attribute +
+      // age-predicate request below. Never used by the doctor/pharmacy
+      // portals — opt-in only, so default proof-request behavior for every
+      // existing caller is unchanged.
+      requestAttributes = {
+        name: {
+          names: ["name", "age", "email", "nationalId", "medicalCondition", "bloodType", "emergencyContact", "patientAccountId"],
+          restrictions: [{ cred_def_id: config.credentialDefinitionId }],
+        },
+      };
+    } else if (config.agentType === "--issuer") {
       requestAttributes = {
         name: {
           names: ["nationalId", "medicalCondition", "bloodType"],
-          restriction: [{ cred_def_id: config.credentialDefinitionId }],
+          restrictions: [{ cred_def_id: config.credentialDefinitionId }],
         },
       };
-      requestPredicates = {
-        name: {
-          name: "age",
-          p_type: ">=" as const,
-          p_value: 18,
-          restriction: [{ cred_def_id: config.credentialDefinitionId }],
-        },
-      };
+      // Opt-in only (noPredicate) — isolates "fewer attributes revealed" from
+      // "a ZK predicate was also requested" for the selective-disclosure
+      // benchmark's clean attribute-count-only comparison. Every existing
+      // caller (doctor/pharmacy portals, the original benchmark path) omits
+      // this flag and keeps getting the age predicate, unchanged.
+      if (!noPredicate) {
+        requestPredicates = {
+          name: {
+            name: "age",
+            p_type: ">=" as const,
+            p_value: 18,
+            restrictions: [{ cred_def_id: config.credentialDefinitionId }],
+          },
+        };
+      }
     } else if (config.agentType === "--doctor") {
-      const governmentCredDefId = process.env.ISSUER_CRED_DEF_ID || config.credentialDefinitionId;
+      // Deliberately NOT `|| config.credentialDefinitionId` — that's this
+      // agent's OWN (doctor's) credDef, not government's. config.credentialDefinitionId
+      // is always a real, truthy string once this agent's own registration
+      // succeeds, so that fallback made the `? [...] : []` "no restriction"
+      // branch below unreachable: whenever ISSUER_CRED_DEF_ID was unset, the
+      // restriction silently pointed at the wrong (doctor's own) credDef
+      // instead of correctly falling through to no restriction — making the
+      // proof request permanently unsatisfiable in a way indistinguishable
+      // from a ledger timeout. Confirmed live 2026-07-25.
+      const governmentCredDefId = process.env.ISSUER_CRED_DEF_ID;
       requestAttributes = {
         // patientAccountId is the stable identifier minted at identity
         // issuance (government-agent's credential-routes.ts) — revealing it
@@ -49,7 +78,7 @@ export function registerCommonRoutes(
         // instead of the connection's ephemeral theirDid.
         identity_info: {
           names: ["nationalId", "name", "medicalCondition", "bloodType", "patientAccountId"],
-          restriction: governmentCredDefId ? [{ cred_def_id: governmentCredDefId }] : [],
+          restrictions: governmentCredDefId ? [{ cred_def_id: governmentCredDefId }] : [],
         },
       };
       requestPredicates = {
@@ -57,7 +86,7 @@ export function registerCommonRoutes(
           name: "age",
           p_type: ">=" as const,
           p_value: 18,
-          restriction: governmentCredDefId ? [{ cred_def_id: governmentCredDefId }] : [],
+          restrictions: governmentCredDefId ? [{ cred_def_id: governmentCredDefId }] : [],
         },
       };
     } else if (config.agentType === "--pharmacist") {
@@ -65,7 +94,7 @@ export function registerCommonRoutes(
       requestAttributes = {
         name: {
           names: ["documentId", "documentType", "documentHash", "issuedBy", "issuedAt"],
-          restriction: governmentCredDefId ? [{ cred_def_id: governmentCredDefId }] : [],
+          restrictions: governmentCredDefId ? [{ cred_def_id: governmentCredDefId }] : [],
         },
       };
     } else if (config.agentType === "--healthcare-authority") {
@@ -78,7 +107,7 @@ export function registerCommonRoutes(
       requestAttributes = {
         role_info: {
           names: ["role", "licenseId"],
-          restriction: professionalRoleCredDefId ? [{ cred_def_id: professionalRoleCredDefId }] : [],
+          restrictions: professionalRoleCredDefId ? [{ cred_def_id: professionalRoleCredDefId }] : [],
         },
       };
     }

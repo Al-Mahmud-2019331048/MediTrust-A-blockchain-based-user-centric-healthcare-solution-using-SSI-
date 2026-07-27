@@ -117,9 +117,14 @@ export interface RecoveryRequest {
     approvals: MPOAApproval[];
     status: 'pending' | 'approved' | 'rejected' | 'expired';
     // shareIds of the specific 5-way split issued for this request (via /recovery/initiate-with-split).
-    // Unset for requests created via the older bare /recovery/initiate — reconstruct() skips the
-    // share-provenance check in that case, preserving prior behavior.
+    // Unset for requests created via the older bare /recovery/initiate — reconstruct() rejects
+    // (rather than skips) the share-provenance check in that case; see sss-routes.ts.
     issuedShareIds?: string[];
+    // sha256(shareData) per issued shareId — checking shareId membership alone only proves a
+    // submitted share's ID was once issued, not that its DATA wasn't swapped for something else
+    // while keeping a real (plaintext, publicly visible in API responses) shareId. reconstruct()
+    // must check both.
+    issuedShareFingerprints?: Record<string, string>;
 }
 
 export interface EncryptedPayload {

@@ -7,6 +7,7 @@ import { BaseAgent } from '../shared/agent-base';
 import { createProofStatusCache } from '../shared/cache-utils';
 import { registerCommonRoutes, AgentConfig } from '../shared/common-routes';
 import { registerDebugRoutes } from '../shared/debug-routes';
+import { registerVerifierRoutes } from '../shared/verifier-routes';
 import { registerGovernmentRoutes, registerHospitalAuthorizationRoute } from './src/routes/credential-routes';
 import { registerAnchorRoutes } from './src/routes/anchor-routes';
 
@@ -115,6 +116,7 @@ app.listen(apiPort, async () => {
   registerHospitalAuthorizationRoute(app, agent, agentDid, () => hospitalAuthorizationCredDefId);
   registerAnchorRoutes(app, agent, agentDid);
   registerCommonRoutes(app, agent, commonConfig, proofCache);
+  registerVerifierRoutes(app, agent, proofCache);
   registerDebugRoutes(app, agent, agentLabel, agentPublicEndpoint, apiPort, '--issuer', agentDid, credentialDefinitionId);
 
   console.log(`${agentLabel} routes mounted. Ready.`);

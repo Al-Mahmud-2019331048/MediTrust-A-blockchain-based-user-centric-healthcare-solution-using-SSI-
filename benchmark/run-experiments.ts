@@ -6,7 +6,8 @@ import path from 'path';
 import { splitMEK } from '../crypto/sss/src/key-splitter';
 import { reconstructKey } from '../crypto/sss/src/key-reconstructor';
 import { AuditService } from '../audit/src/services/audit-service';
-import { createTestPatientAgent, connectTestPatientTo, pollUntil, isReachable, randomHex } from './test-patient-helper';
+import { createTestPatientAgent, connectTestPatientTo, pollUntil, isReachable, randomHex, shutdownAllTestPatients } from './test-patient-helper';
+import { runSelectiveDisclosurePayloadAndLatency, runConcurrentCredentialWorkflows } from './selective-disclosure-experiments';
 
 const DWN_URL = (process.env.PATIENT_DWN_URL || 'http://localhost:5050').replace(/\/$/, '');
 const SSS_URL = `http://localhost:${process.env.SSS_PORT || '4008'}`;
@@ -40,7 +41,7 @@ async function runDwnStorageOverhead(): Promise<void> {
     return;
   }
 
-  const patientDID = `did:bench:patient-${randomHex(4)}`;
+  const patientDID = crypto.randomUUID(); // must be a real UUID — DWN routes validate patientDID format (2026-07-25 fix)
   const data = {
     diagnosis: 'Type 2 Diabetes Mellitus, well controlled',
     labResults: 'HbA1c 6.8%, fasting glucose 118 mg/dL',
@@ -79,8 +80,9 @@ async function runSelectiveSharingOverhead(): Promise<void> {
     return;
   }
 
-  const patientDID = `did:bench:patient-${randomHex(4)}`;
-  const grantedToDID = `did:bench:doctor-${randomHex(4)}`;
+  const patientDID = crypto.randomUUID(); // must be a real UUID — DWN routes validate patientDID format (2026-07-25 fix)
+  const filteredGranteeDID = `did:bench:doctor-${randomHex(4)}`;
+  const fullGranteeDID = `did:bench:insurer-${randomHex(4)}`;
   const data = { diagnosis: 'flu', labResults: 'normal', prescription: 'rest and fluids', notes: 'private note' };
 
   const storeRes = await fetch(`${DWN_URL}/dwn/storeRecord`, {
@@ -93,7 +95,20 @@ async function runSelectiveSharingOverhead(): Promise<void> {
   await fetch(`${DWN_URL}/dwn/shareRecord`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ patientDID, grantedToDID, recordType: 'medical', purpose: 'treatment', allowedFields: ['diagnosis'] }),
+    body: JSON.stringify({ patientDID, grantedToDID: filteredGranteeDID, recordType: 'medical', purpose: 'treatment', allowedFields: ['diagnosis'] }),
+  });
+  // "Full" baseline is now ALSO a grant-based (non-self) read, with an
+  // unrestricted grant (allowedFields: [] means unrestricted per
+  // ProtocolsInterface.applyFieldFilter), not a self-read. A self-read used
+  // to be the baseline, but self-reads compute `accessPolicy` (added
+  // 2026-07-25 — see CLAUDE.md Security Audit) while non-self reads don't,
+  // which silently added an unrelated LevelDB-scan cost to only one side of
+  // the comparison, distorting the measured "filtering overhead". Comparing
+  // two grant-based reads isolates the actual field-filtering cost again.
+  await fetch(`${DWN_URL}/dwn/shareRecord`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ patientDID, grantedToDID: fullGranteeDID, recordType: 'medical', purpose: 'audit', allowedFields: [] }),
   });
 
   const iterations = 20;
@@ -102,12 +117,12 @@ async function runSelectiveSharingOverhead(): Promise<void> {
 
   for (let i = 0; i < iterations; i++) {
     const t0 = performance.now();
-    await fetch(`${DWN_URL}/dwn/queryRecord?recordId=${record.recordId}&requesterDID=${patientDID}`);
+    await fetch(`${DWN_URL}/dwn/queryRecord?recordId=${record.recordId}&requesterDID=${fullGranteeDID}`);
     fullTimes.push(performance.now() - t0);
   }
   for (let i = 0; i < iterations; i++) {
     const t0 = performance.now();
-    await fetch(`${DWN_URL}/dwn/queryRecord?recordId=${record.recordId}&requesterDID=${grantedToDID}`);
+    await fetch(`${DWN_URL}/dwn/queryRecord?recordId=${record.recordId}&requesterDID=${filteredGranteeDID}`);
     filteredTimes.push(performance.now() - t0);
   }
 
@@ -118,10 +133,10 @@ async function runSelectiveSharingOverhead(): Promise<void> {
 
   experiments.push({
     name,
-    metric: 'ms (filtered read avg − full self-read avg)',
+    metric: 'ms (filtered read avg − full read avg, both grant-based)',
     status: 'ok',
     value: Number(overhead.toFixed(3)),
-    detail: `n=${iterations} each; full self-read avg=${avgFull.toFixed(3)}ms, Protocol-filtered read avg=${avgFiltered.toFixed(3)}ms`,
+    detail: `n=${iterations} each; full grant-based read avg=${avgFull.toFixed(3)}ms, Protocol-filtered read avg=${avgFiltered.toFixed(3)}ms (both non-self, so neither pays the accessPolicy computation cost — isolates pure field-filtering overhead)`,
   });
 }
 
@@ -132,7 +147,7 @@ async function runAccessRevocationTime(): Promise<void> {
     return;
   }
 
-  const patientDID = `did:bench:patient-${randomHex(4)}`;
+  const patientDID = crypto.randomUUID(); // must be a real UUID — DWN routes validate patientDID format (2026-07-25 fix)
   const grantedToDID = `did:bench:doctor-${randomHex(4)}`;
 
   const storeRes = await fetch(`${DWN_URL}/dwn/storeRecord`, {
@@ -363,7 +378,7 @@ async function attack1_readWithoutGrant(): Promise<void> {
     attacks.push({ name, passed: false, detail: `DWN not reachable at ${DWN_URL}` });
     return;
   }
-  const patientDID = `did:bench:patient-${randomHex(4)}`;
+  const patientDID = crypto.randomUUID(); // must be a real UUID — DWN routes validate patientDID format (2026-07-25 fix)
   const strangerDID = `did:bench:stranger-${randomHex(4)}`;
   const storeRes = await fetch(`${DWN_URL}/dwn/storeRecord`, {
     method: 'POST',
@@ -480,12 +495,20 @@ async function main() {
   await runBlockchainTransactionLatency();
   await runVcIssuanceAndVerification();
 
+  console.log('Running selective-disclosure payload/latency experiment...');
+  experiments.push(...(await runSelectiveDisclosurePayloadAndLatency()));
+
+  console.log('Running concurrent credential workflow scalability experiment (this can take several minutes)...');
+  experiments.push(await runConcurrentCredentialWorkflows());
+
   console.log('Running attack simulations...');
   await attack1_readWithoutGrant();
   await attack2_sssInsufficientShares();
   await attack3_mpoaBeforeThreshold();
   await attack4_mpoaExpired();
   await attack5_tamperedAuditEntry();
+
+  await shutdownAllTestPatients();
 
   const resultsDir = path.resolve(__dirname, 'results');
   fs.mkdirSync(resultsDir, { recursive: true });
