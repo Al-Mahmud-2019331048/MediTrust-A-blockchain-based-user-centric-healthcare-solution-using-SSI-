@@ -6,6 +6,7 @@ import { backupWrite } from '../backup/backup-service';
 import { AuditService } from '../../../../audit/src/services/audit-service';
 import { DWNRecord, Permission } from '../../../../agents/shared/types';
 import { isValidPatientDID } from '../utils/validation';
+import { consumeNonce } from '../utils/nonce-guard';
 
 const BINARY_CONTENT_TYPES: DWNRecord['contentType'][] = [
   'application/pdf',
@@ -16,16 +17,18 @@ const BINARY_CONTENT_TYPES: DWNRecord['contentType'][] = [
 export const recordRouter = Router();
 
 // POST /storeRecord — mounted at /dwn/storeRecord by server.ts (Day 13)
-// Body: { patientDID, recordType, protocol, contentType, fileName?, data, authorDID? }
+// Body: { patientDID, recordType, protocol, contentType, fileName?, data, authorDID?, nonce }
 // data is a JSON string/object for contentType 'application/json', or a base64
-// string for binary contentTypes.
+// string for binary contentTypes. nonce must be a fresh, caller-generated
+// value never sent before — guards against a captured request being replayed
+// to silently duplicate a write.
 recordRouter.post('/storeRecord', async (req: Request, res: Response) => {
   try {
-    const { patientDID, recordType, protocol, contentType, fileName, data, authorDID } = req.body;
+    const { patientDID, recordType, protocol, contentType, fileName, data, authorDID, nonce } = req.body;
 
-    if (!patientDID || !recordType || !protocol || !contentType || data === undefined) {
+    if (!patientDID || !recordType || !protocol || !contentType || data === undefined || !nonce) {
       return res.status(400).json({
-        error: 'patientDID, recordType, protocol, contentType, and data are required',
+        error: 'patientDID, recordType, protocol, contentType, data, and nonce are required',
       });
     }
     // patientDID is used directly as a backup-destination scope key
@@ -35,6 +38,9 @@ recordRouter.post('/storeRecord', async (req: Request, res: Response) => {
     // location. Must be the real UUID minted at identity issuance.
     if (!isValidPatientDID(patientDID)) {
       return res.status(400).json({ error: 'patientDID must be a valid UUID' });
+    }
+    if (typeof nonce !== 'string' || !consumeNonce(nonce)) {
+      return res.status(409).json({ error: 'This nonce has already been used — possible replay, write rejected' });
     }
 
     const isBinary = BINARY_CONTENT_TYPES.includes(contentType);

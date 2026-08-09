@@ -9,6 +9,7 @@ import { protocolRouter } from './src/routes/protocol-routes';
 import { selfCustodyRouter } from './src/routes/self-custody-routes';
 import { mpoaBridgeRouter } from './src/routes/mpoa-bridge-routes';
 import { restoreRouter } from './src/routes/restore-routes';
+import { notificationRouter } from './src/routes/notification-routes';
 import { LevelDBAdapter } from './src/storage/leveldb';
 
 const app = express();
@@ -38,6 +39,7 @@ app.use('/dwn/protocols', protocolRouter);
 app.use('/dwn', selfCustodyRouter);
 app.use('/dwn', mpoaBridgeRouter);
 app.use('/dwn', restoreRouter);
+app.use('/dwn', notificationRouter);
 
 app.use((_req: Request, res: Response) => {
   res.status(404).json({ error: 'Not found' });

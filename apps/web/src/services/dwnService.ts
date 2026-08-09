@@ -52,10 +52,13 @@ export async function shareRecord(input: {
   patientDID: string; grantedToDID: string; recordType: string;
   purpose: string; allowedFields?: string[]; expiresAt?: string | null;
 }): Promise<Permission> {
+  // Generated fresh per call — the DWN rejects a repeat of the same nonce as
+  // a replay (dwn/patient-node/src/routes/permission-routes.ts).
+  const nonce = crypto.randomUUID();
   const response = await fetch(`${DWN_URL}/dwn/shareRecord`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(input),
+    body: JSON.stringify({ ...input, nonce }),
   });
   return asJson(response);
 }
@@ -109,6 +112,22 @@ export async function restoreData(patientDID: string) {
 export async function getSigningKeyStatus(patientDID: string): Promise<{ hasKey: boolean; publicKeyFingerprint: string | null }> {
   const response = await fetch(`${DWN_URL}/dwn/patients/${encodeURIComponent(patientDID)}/signing-key-status`);
   return asJson(response);
+}
+
+export interface DwnNotification {
+  eventId: string;
+  eventType: string;
+  message: string;
+  actorDid: string;
+  timestamp: string;
+}
+
+export async function getNotifications(patientDID: string, limit = 20): Promise<DwnNotification[]> {
+  const response = await fetch(
+    `${DWN_URL}/dwn/patients/${encodeURIComponent(patientDID)}/notifications?requesterDID=${encodeURIComponent(patientDID)}&limit=${limit}`
+  );
+  const body = await asJson(response);
+  return body.notifications as DwnNotification[];
 }
 
 export async function checkDwnHealth(): Promise<boolean> {

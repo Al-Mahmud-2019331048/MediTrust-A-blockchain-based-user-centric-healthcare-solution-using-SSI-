@@ -1,3 +1,4 @@
+import crypto from 'crypto';
 import { DWNRecord } from './types';
 
 export interface StoreRecordInput {
@@ -34,12 +35,16 @@ export async function storeRecord(input: StoreRecordInput): Promise<DWNRecord> {
   const baseUrl = (process.env.PATIENT_DWN_URL || 'http://localhost:5050').replace(/\/$/, '');
   const url = `${baseUrl}/dwn/storeRecord`;
 
+  // Generated fresh per call, never exposed to storeRecord()'s own callers —
+  // the DWN rejects a repeat of the same nonce as a replay (record-routes.ts).
+  const nonce = crypto.randomUUID();
+
   let response: Response;
   try {
     response = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(input),
+      body: JSON.stringify({ ...input, nonce }),
     });
   } catch (err) {
     throw new Error(`Failed to reach DWN at ${url}: ${(err as Error).message}`);

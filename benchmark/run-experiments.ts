@@ -52,7 +52,7 @@ async function runDwnStorageOverhead(): Promise<void> {
   const res = await fetch(`${DWN_URL}/dwn/storeRecord`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ patientDID, recordType: 'medical', protocol: 'MedicalRecord', contentType: 'application/json', data }),
+    body: JSON.stringify({ patientDID, recordType: 'medical', protocol: 'MedicalRecord', contentType: 'application/json', data, nonce: crypto.randomUUID() }),
   });
   const record = await res.json();
 
@@ -88,14 +88,14 @@ async function runSelectiveSharingOverhead(): Promise<void> {
   const storeRes = await fetch(`${DWN_URL}/dwn/storeRecord`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ patientDID, recordType: 'medical', protocol: 'MedicalRecord', contentType: 'application/json', data }),
+    body: JSON.stringify({ patientDID, recordType: 'medical', protocol: 'MedicalRecord', contentType: 'application/json', data, nonce: crypto.randomUUID() }),
   });
   const record = await storeRes.json();
 
   await fetch(`${DWN_URL}/dwn/shareRecord`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ patientDID, grantedToDID: filteredGranteeDID, recordType: 'medical', purpose: 'treatment', allowedFields: ['diagnosis'] }),
+    body: JSON.stringify({ patientDID, grantedToDID: filteredGranteeDID, recordType: 'medical', purpose: 'treatment', allowedFields: ['diagnosis'], nonce: crypto.randomUUID() }),
   });
   // "Full" baseline is now ALSO a grant-based (non-self) read, with an
   // unrestricted grant (allowedFields: [] means unrestricted per
@@ -108,7 +108,7 @@ async function runSelectiveSharingOverhead(): Promise<void> {
   await fetch(`${DWN_URL}/dwn/shareRecord`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ patientDID, grantedToDID: fullGranteeDID, recordType: 'medical', purpose: 'audit', allowedFields: [] }),
+    body: JSON.stringify({ patientDID, grantedToDID: fullGranteeDID, recordType: 'medical', purpose: 'audit', allowedFields: [], nonce: crypto.randomUUID() }),
   });
 
   const iterations = 20;
@@ -153,14 +153,14 @@ async function runAccessRevocationTime(): Promise<void> {
   const storeRes = await fetch(`${DWN_URL}/dwn/storeRecord`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ patientDID, recordType: 'medical', protocol: 'MedicalRecord', contentType: 'application/json', data: { a: 1 } }),
+    body: JSON.stringify({ patientDID, recordType: 'medical', protocol: 'MedicalRecord', contentType: 'application/json', data: { a: 1 }, nonce: crypto.randomUUID() }),
   });
   const record = await storeRes.json();
 
   const shareRes = await fetch(`${DWN_URL}/dwn/shareRecord`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ patientDID, grantedToDID, recordType: 'medical', purpose: 'treatment' }),
+    body: JSON.stringify({ patientDID, grantedToDID, recordType: 'medical', purpose: 'treatment', nonce: crypto.randomUUID() }),
   });
   const permission = await shareRes.json();
 
@@ -383,7 +383,7 @@ async function attack1_readWithoutGrant(): Promise<void> {
   const storeRes = await fetch(`${DWN_URL}/dwn/storeRecord`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ patientDID, recordType: 'medical', protocol: 'MedicalRecord', contentType: 'application/json', data: { a: 1 } }),
+    body: JSON.stringify({ patientDID, recordType: 'medical', protocol: 'MedicalRecord', contentType: 'application/json', data: { a: 1 }, nonce: crypto.randomUUID() }),
   });
   const record = await storeRes.json();
   const res = await fetch(`${DWN_URL}/dwn/queryRecord?recordId=${record.recordId}&requesterDID=${strangerDID}`);
@@ -464,9 +464,9 @@ async function attack5_tamperedAuditEntry(): Promise<void> {
     metadata: {},
   });
 
-  const genuineValid = AuditService.verify(event);
+  const genuineValid = await AuditService.verify(event);
   const tampered = { ...event, resourceId: `tampered-${randomHex(4)}` };
-  const tamperedValid = AuditService.verify(tampered);
+  const tamperedValid = await AuditService.verify(tampered);
 
   const passed = genuineValid === true && tamperedValid === false;
   attacks.push({

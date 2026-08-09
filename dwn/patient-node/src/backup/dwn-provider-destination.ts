@@ -102,7 +102,7 @@ export class DWNProviderBackupDestination implements BackupDestination {
     }
   }
 
-  async listEntries(patientDID: string): Promise<BackupEntry[]> {
+  async listEntries(patientDID: string, limit?: number): Promise<BackupEntry[]> {
     // The normal, strongly-trusted case: this device already has its own
     // locally-known public key (from having pushed at least once before) and
     // never needs to ask the provider what to trust.
@@ -126,7 +126,8 @@ export class DWNProviderBackupDestination implements BackupDestination {
       publicKeyPem = keyBody.publicKeyPem;
     }
 
-    const response = await fetch(`${baseUrl()}/backup/patients/${encodeURIComponent(patientDID)}/entries`);
+    const query = limit ? `?limit=${limit}` : '';
+    const response = await fetch(`${baseUrl()}/backup/patients/${encodeURIComponent(patientDID)}/entries${query}`);
     if (!response.ok) {
       const body = await response.text();
       throw new Error(`Backup provider list failed with status ${response.status}: ${body}`);

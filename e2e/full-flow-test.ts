@@ -318,7 +318,8 @@ async function main() {
     steps.push({ step: '9. Audit integrity', status: 'blocked', detail: 'No patientDID to check audit events for' });
   } else {
     const events = await AuditService.getByTarget(patientDID);
-    const allGenuine = events.length > 0 && events.every((e) => AuditService.verify(e));
+    const verifyResults = await Promise.all(events.map((e) => AuditService.verify(e)));
+    const allGenuine = events.length > 0 && verifyResults.every(Boolean);
     steps.push({
       step: '9. Audit integrity (positive case)',
       status: allGenuine ? 'ok' : 'blocked',

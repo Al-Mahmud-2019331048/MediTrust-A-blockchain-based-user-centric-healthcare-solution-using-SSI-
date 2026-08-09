@@ -1,6 +1,7 @@
 import crypto from 'crypto';
 import { PrismaClient } from '@prisma/client';
 import { signAuditEvent, verifyAuditEventSignature, signWithPatientKey, verifyWithPatientKey } from '../../../crypto/encryption/src/signing-utils';
+import { sha256String } from '../../../crypto/encryption/src/hash-utils';
 import { AuditEventType } from '../../../agents/shared/types';
 
 export interface AuditEvent {
@@ -91,6 +92,34 @@ function rowToEvent(row: {
     anchorError: row.anchorError,
     anchoredAt: row.anchoredAt ? row.anchoredAt.toISOString() : null,
   };
+}
+
+// verify() previously trusted whatever signerPublicKey was stored on the row
+// being checked — with no independent confirmation that key really belongs
+// to the patient it claims to. Someone able to write to audit.db directly
+// could mutate a row, sign it with their own throwaway keypair, and verify()
+// would pass it (found 2026-08-09 re-audit). This closes that gap for
+// patient-signed events by cross-checking the row's key fingerprint against
+// the DWN's own on-file record for that patient (actorDid, for every
+// patient-signed event type — see AuditEventInput.patientSigningKey above),
+// via the same fingerprint endpoint the frontend already uses
+// (self-custody-routes.ts's /signing-key-status) — never the full private
+// key, and no direct LevelDB dependency (preserves this module's callability
+// from crypto/sss and benchmark, which must never open the DWN's storage).
+// Fails CLOSED (not verified) if the DWN can't be reached, matching the
+// fail-closed treatment already given to other security-critical recovery
+// checks in this codebase (see backup-service.ts's verifyMEKAgainstBackup).
+async function isBoundToPatientKey(actorDid: string, signerPublicKey: string): Promise<boolean> {
+  const baseUrl = (process.env.PATIENT_DWN_URL || 'http://localhost:5050').replace(/\/$/, '');
+  try {
+    const response = await fetch(`${baseUrl}/dwn/patients/${encodeURIComponent(actorDid)}/signing-key-status`);
+    if (!response.ok) return false;
+    const { publicKeyFingerprint } = (await response.json()) as { publicKeyFingerprint: string | null };
+    if (!publicKeyFingerprint) return false;
+    return sha256String(signerPublicKey).slice(0, 32) === publicKeyFingerprint;
+  } catch {
+    return false;
+  }
 }
 
 export class AuditService {
@@ -185,14 +214,14 @@ export class AuditService {
   // database went undetected despite the signature technically still being
   // "valid" (it validates the ORIGINAL signed payload, which verify() simply
   // wasn't checking the row against). Confirmed live via adversarial testing.
-  static verify(event: AuditEvent): boolean {
+  static async verify(event: AuditEvent): Promise<boolean> {
     try {
       const decoded = (
         event.signerPublicKey
           ? verifyWithPatientKey(event.signature, event.signerPublicKey)
           : verifyAuditEventSignature(event.signature)
       ) as Record<string, unknown>;
-      return (
+      const fieldsMatch =
         decoded.eventId === event.eventId &&
         decoded.eventType === event.eventType &&
         decoded.actorDid === event.actorDid &&
@@ -201,8 +230,16 @@ export class AuditService {
         decoded.resourceType === event.resourceType &&
         decoded.action === event.action &&
         decoded.timestamp === event.timestamp &&
-        JSON.stringify(decoded.metadata ?? null) === JSON.stringify(event.metadata ?? null)
-      );
+        JSON.stringify(decoded.metadata ?? null) === JSON.stringify(event.metadata ?? null);
+      if (!fieldsMatch) return false;
+
+      // Patient-signed events: the signature/field checks above only prove
+      // "this signature matches this key" — not that the key is genuinely
+      // the patient's. See isBoundToPatientKey() above for why and how.
+      if (event.signerPublicKey) {
+        return await isBoundToPatientKey(event.actorDid, event.signerPublicKey);
+      }
+      return true;
     } catch {
       return false;
     }

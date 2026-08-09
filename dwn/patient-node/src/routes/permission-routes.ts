@@ -6,13 +6,16 @@ import { attemptAnchor } from '../../../../audit/src/services/anchor-client';
 import { sha256String } from '../../../../crypto/encryption/src/hash-utils';
 import { getOrCreateSigningKey } from '../encryption/patient-signing-key';
 import { isValidPatientDID } from '../utils/validation';
+import { consumeNonce } from '../utils/nonce-guard';
 
 export const permissionRouter = Router();
 
 // POST /shareRecord — mounted at /dwn/shareRecord by server.ts (Day 13)
 // Body: { patientDID, grantedToDID, recordType, purpose, expiresAt?, allowedFields?,
-//         actorRole?, roleProofRecordId?, verifierAgentBaseUrl? }
+//         actorRole?, roleProofRecordId?, verifierAgentBaseUrl?, nonce }
 // actorRole and roleProofRecordId must be supplied together — see permissions.ts.
+// nonce must be a fresh, caller-generated value never sent before — guards
+// against a captured grant request being replayed.
 permissionRouter.post('/shareRecord', async (req: Request, res: Response) => {
   try {
     const {
@@ -25,17 +28,21 @@ permissionRouter.post('/shareRecord', async (req: Request, res: Response) => {
       actorRole,
       roleProofRecordId,
       verifierAgentBaseUrl,
+      nonce,
     } = req.body;
 
-    if (!patientDID || !grantedToDID || !recordType || !purpose) {
+    if (!patientDID || !grantedToDID || !recordType || !purpose || !nonce) {
       return res.status(400).json({
-        error: 'patientDID, grantedToDID, recordType, and purpose are required',
+        error: 'patientDID, grantedToDID, recordType, purpose, and nonce are required',
       });
     }
     // See record-routes.ts's storeRecord for why this matters — patientDID
     // becomes a backup-destination scope key.
     if (!isValidPatientDID(patientDID)) {
       return res.status(400).json({ error: 'patientDID must be a valid UUID' });
+    }
+    if (typeof nonce !== 'string' || !consumeNonce(nonce)) {
+      return res.status(409).json({ error: 'This nonce has already been used — possible replay, grant rejected' });
     }
 
     if (actorRole && !roleProofRecordId) {

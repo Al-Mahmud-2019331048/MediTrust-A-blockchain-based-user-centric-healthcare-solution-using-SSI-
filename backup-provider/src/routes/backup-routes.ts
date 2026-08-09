@@ -54,13 +54,19 @@ backupRouter.get('/patients/:patientDID/public-key', async (req: Request, res: R
   }
 });
 
-// GET /backup/patients/:patientDID/entries
+// GET /backup/patients/:patientDID/entries?limit=N
 // Deliberately unauthenticated (confirmed decision) — content is always
 // already ciphertext by the time it reaches this server, same PoC trust
 // boundary as GET /dwn/queryRecord elsewhere in this project.
+// limit is optional — omitted, this returns full history (what a real
+// restore needs); a caller that only needs to check "does anything exist"
+// can pass a small limit to avoid forcing a full scan (see
+// provider-service.ts's listEntries doc comment).
 backupRouter.get('/patients/:patientDID/entries', async (req: Request, res: Response) => {
   try {
-    const tokens = await listEntries(req.params.patientDID);
+    const rawLimit = parseInt(req.query.limit as string, 10);
+    const limit = Number.isNaN(rawLimit) || rawLimit <= 0 ? undefined : rawLimit;
+    const tokens = await listEntries(req.params.patientDID, limit);
     res.status(200).json({ tokens });
   } catch (err) {
     handleError(err, res);

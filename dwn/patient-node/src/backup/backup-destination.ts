@@ -10,5 +10,9 @@ export interface BackupEntry {
 
 export interface BackupDestination {
   putEntry(patientDID: string, entry: BackupEntry): Promise<void>;
-  listEntries(patientDID: string): Promise<BackupEntry[]>;
+  // limit, when given, is a genuine bound on the underlying scan (not just a
+  // post-hoc truncation) — a caller that only needs to confirm at least one
+  // entry exists (e.g. key-recovery verification) shouldn't force a full-
+  // history read. Omitted entirely, this returns full history.
+  listEntries(patientDID: string, limit?: number): Promise<BackupEntry[]>;
 }

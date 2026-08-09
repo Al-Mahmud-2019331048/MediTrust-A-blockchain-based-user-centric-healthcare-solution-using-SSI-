@@ -70,14 +70,29 @@ export function registerCommonRoutes(
       // instead of correctly falling through to no restriction — making the
       // proof request permanently unsatisfiable in a way indistinguishable
       // from a ledger timeout. Confirmed live 2026-07-25.
+      //
+      // Falling back to `[]` (no restriction) instead is correct in that it's
+      // no longer unsatisfiable — but an empty AnonCreds restriction list
+      // means "any issuer accepted," not "fail closed." An unset env var
+      // must not silently turn identity verification into "accept anyone
+      // self-issuing these attribute names" — found 2026-08-09 re-audit.
       const governmentCredDefId = process.env.ISSUER_CRED_DEF_ID;
+      if (!governmentCredDefId) {
+        return res.status(503).send({
+          error: "Identity verification is not configured (ISSUER_CRED_DEF_ID is unset) — refusing to send an unrestricted proof request.",
+        });
+      }
       requestAttributes = {
         // patientAccountId is the stable identifier minted at identity
         // issuance (government-agent's credential-routes.ts) — revealing it
         // here is what lets the doctor use it as the DWN's patientDID
-        // instead of the connection's ephemeral theirDid.
+        // instead of the connection's ephemeral theirDid. medicalCondition
+        // and bloodType are deliberately NOT requested here — they were
+        // previously bundled into this "identity" reveal with no legitimate
+        // use for an identity check, silently exposing clinical data on
+        // every verification (found 2026-08-09 re-audit).
         identity_info: {
-          names: ["nationalId", "name", "medicalCondition", "bloodType", "patientAccountId"],
+          names: ["nationalId", "name", "patientAccountId"],
           restrictions: governmentCredDefId ? [{ cred_def_id: governmentCredDefId }] : [],
         },
       };
@@ -90,7 +105,14 @@ export function registerCommonRoutes(
         },
       };
     } else if (config.agentType === "--pharmacist") {
+      // Same fail-open risk as --doctor above: an unset env var must not
+      // silently accept any issuer (found 2026-08-09 re-audit).
       const governmentCredDefId = process.env.GOVERNMENT_MEDICAL_CRED_DEF_ID;
+      if (!governmentCredDefId) {
+        return res.status(503).send({
+          error: "Document verification is not configured (GOVERNMENT_MEDICAL_CRED_DEF_ID is unset) — refusing to send an unrestricted proof request.",
+        });
+      }
       requestAttributes = {
         name: {
           names: ["documentId", "documentType", "documentHash", "issuedBy", "issuedAt"],

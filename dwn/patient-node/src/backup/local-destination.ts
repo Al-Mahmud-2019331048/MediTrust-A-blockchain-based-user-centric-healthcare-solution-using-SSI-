@@ -25,12 +25,16 @@ export class LocalBackupDestination implements BackupDestination {
     await fs.writeFile(path.join(dir, entry.fileName), entry.content, 'utf8');
   }
 
-  async listEntries(patientDID: string): Promise<BackupEntry[]> {
+  async listEntries(patientDID: string, limit?: number): Promise<BackupEntry[]> {
     const dir = this.patientDir(patientDID);
     try {
       const fileNames = await fs.readdir(dir);
+      const sorted = fileNames.sort();
+      // Slicing before reading (not after) means a limited caller only pays
+      // for the files it actually needs, not a full directory read.
+      const toRead = limit ? sorted.slice(0, limit) : sorted;
       const entries: BackupEntry[] = [];
-      for (const fileName of fileNames.sort()) {
+      for (const fileName of toRead) {
         try {
           const content = await fs.readFile(path.join(dir, fileName), 'utf8');
           entries.push({ fileName, content });

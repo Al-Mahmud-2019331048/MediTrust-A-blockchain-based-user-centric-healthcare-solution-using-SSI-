@@ -21,6 +21,14 @@ export function registerPharmacyRoutes(
     // could ever match. Same bug, same fix, as agents/shared/common-routes.ts's
     // --doctor branch (see CLAUDE.md Security Audit, confirmed live 2026-07-25).
     const governmentCredDefId = process.env.ISSUER_CRED_DEF_ID;
+    // An unset env var must not silently accept any issuer — see the
+    // matching fix in agents/shared/common-routes.ts's --doctor branch
+    // (found 2026-08-09 re-audit).
+    if (!governmentCredDefId) {
+      return res.status(503).json({
+        error: "Identity verification is not configured (ISSUER_CRED_DEF_ID is unset) — refusing to send an unrestricted proof request.",
+      });
+    }
 
     try {
       await agent.sendMessage(connectionId, "Please prepare to share your identity credentials.");
@@ -36,7 +44,11 @@ export function registerPharmacyRoutes(
             // attribute doctor-agent's proof request reveals. Needed here so
             // /read-prescription below can query the DWN by the patient's
             // real patientDID instead of an ephemeral connection ID.
-            names: ["nationalId", "name", "medicalCondition", "bloodType", "patientAccountId"],
+            // medicalCondition and bloodType are deliberately NOT requested
+            // here — no legitimate use in an identity check, previously
+            // exposed clinical data on every verification (found 2026-08-09
+            // re-audit).
+            names: ["nationalId", "name", "patientAccountId"],
             restrictions: governmentCredDefId ? [{ cred_def_id: governmentCredDefId }] : [],
           },
         },
@@ -62,23 +74,25 @@ export function registerPharmacyRoutes(
     if (!connectionId) return res.status(400).json({ error: "connectionId is required" });
 
     const doctorCredDefId = process.env.DOCTOR_MEDICAL_CRED_DEF_ID;
+    // An unset/placeholder ("dummy-") env var used to silently fall back to
+    // an unrestricted proof request — any self-issued "prescription" would
+    // pass. Must fail instead of accepting any issuer (found 2026-08-09
+    // re-audit).
+    if (!doctorCredDefId || doctorCredDefId.startsWith("dummy-")) {
+      return res.status(503).json({
+        error: "Prescription verification is not configured (DOCTOR_MEDICAL_CRED_DEF_ID is unset) — refusing to send an unrestricted proof request.",
+      });
+    }
 
     try {
       await agent.sendMessage(connectionId, "Please prepare to share your prescription credentials.");
 
-      const requestAttributes = doctorCredDefId && !doctorCredDefId.startsWith("dummy-")
-        ? {
-            prescription_info: {
-              names: ["documentId", "documentType", "documentHash", "patientName", "diagnosis", "prescription", "issuedBy", "issuedAt"],
-              restrictions: [{ cred_def_id: doctorCredDefId }],
-            },
-          }
-        : {
-            prescription_info: {
-              names: ["documentId", "documentType", "documentHash", "issuedBy", "issuedAt"],
-              restrictions: [],
-            },
-          };
+      const requestAttributes = {
+        prescription_info: {
+          names: ["documentId", "documentType", "documentHash", "patientName", "diagnosis", "prescription", "issuedBy", "issuedAt"],
+          restrictions: [{ cred_def_id: doctorCredDefId }],
+        },
+      };
 
       const result = await agent.sendProofRequest({
         proofRequestlabel: "prescription-verification",

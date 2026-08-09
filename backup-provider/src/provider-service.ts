@@ -115,15 +115,25 @@ export async function pushEntry(patientDID: string, token: string): Promise<void
 }
 
 /**
- * Returns every stored token for a patient, raw and unverified — this
- * server is not the trust boundary for reads (deliberately unauthenticated,
- * same PoC trust boundary as GET /dwn/queryRecord); the caller (the
- * patient's own DWN) re-verifies every token against the public key it
- * already knows locally before trusting any of it. Naturally comes back in
- * write order since fileName is a zero-padded sequence number.
+ * Returns stored tokens for a patient, raw and unverified — this server is
+ * not the trust boundary for reads (deliberately unauthenticated, same PoC
+ * trust boundary as GET /dwn/queryRecord); the caller (the patient's own
+ * DWN) re-verifies every token against the public key it already knows
+ * locally before trusting any of it. Naturally comes back in write order
+ * since fileName is a zero-padded sequence number.
+ *
+ * `limit`, when given, is passed straight to the LevelDB iterator (which
+ * stops reading as soon as it's satisfied) rather than truncating an
+ * already-fetched full list — a genuine bound on the scan itself, not just
+ * on the response size. Added so a caller that only needs to confirm "does
+ * at least one entry exist" (e.g. key-recovery verification, see
+ * dwn/patient-node/src/backup/backup-service.ts's verifyMEKAgainstBackup)
+ * doesn't force a full-history scan on every attempt — previously the only
+ * bound on that cost was a rate limiter on the DWN side capping how often
+ * an attempt could be made at all, not the cost of any single attempt.
  */
-export async function listEntries(patientDID: string): Promise<string[]> {
-  const entries = await LevelDBAdapter.scan({ prefix: entryPrefix(patientDID) });
+export async function listEntries(patientDID: string, limit?: number): Promise<string[]> {
+  const entries = await LevelDBAdapter.scan({ prefix: entryPrefix(patientDID), limit });
   return entries.map((e) => e.value);
 }
 

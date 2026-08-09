@@ -255,9 +255,18 @@ export async function verifyMEKAgainstBackup(patientDID: string, mek: Buffer): P
   }
   const destination = getDestination();
 
+  // Every patient-scoped entry (record/permission/signing_key) is always
+  // encrypted (only the shared, non-patient _protocols bucket ever has
+  // encrypted: false) — so the loop below always accepts the very first
+  // entry it's given. Asking the destination for just 1 turns what used to
+  // be an unbounded full-history scan on every recovery attempt into a
+  // single-entry lookup, closing the resource-exhaustion angle at its
+  // source rather than only rate-limiting how often it can be triggered
+  // (see isRateLimited() calls in self-custody-routes.ts/mpoa-bridge-
+  // routes.ts, which bound attempt frequency but not the cost per attempt).
   let patientEntries: BackupEntry[];
   try {
-    patientEntries = await destination.listEntries(patientDID);
+    patientEntries = await destination.listEntries(patientDID, 1);
   } catch (err) {
     console.warn(`verifyMEKAgainstBackup: backup destination unreachable for ${patientDID}: ${(err as Error).message}`);
     return 'unreachable';

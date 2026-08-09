@@ -4,7 +4,8 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import {
   queryRecords, shareRecord, revokeAccess, initiateSelfCustody, restoreSelfCustody,
-  getMekStatus, restoreData, getSigningKeyStatus, DWNRecordSummary, SelfCustodyShare,
+  getMekStatus, restoreData, getSigningKeyStatus, getNotifications,
+  DWNRecordSummary, SelfCustodyShare, DwnNotification,
 } from '@/services/dwnService';
 import { RecordCard } from '@/components/RecordCard';
 
@@ -71,6 +72,7 @@ export default function PatientDashboard() {
             </button>
           </div>
 
+          <NotificationsPanel patientDID={activeDID} />
           <RecordsPanel patientDID={activeDID} />
           <ConsentPanel patientDID={activeDID} />
           <KeyRecoveryPanel patientDID={activeDID} />
@@ -105,6 +107,53 @@ function Card({ title, subtitle, children }: { title: string; subtitle?: string;
       {subtitle && <p className="mt-1 text-sm text-gray-500">{subtitle}</p>}
       <div className="mt-4">{children}</div>
     </section>
+  );
+}
+
+const NOTIFICATIONS_POLL_INTERVAL_MS = 8000;
+
+function NotificationsPanel({ patientDID }: { patientDID: string }) {
+  const [notifications, setNotifications] = useState<DwnNotification[]>([]);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const load = async () => {
+      try {
+        const result = await getNotifications(patientDID);
+        if (!cancelled) {
+          setNotifications(result);
+          setError(null);
+        }
+      } catch (err) {
+        if (!cancelled) setError((err as Error).message);
+      }
+    };
+
+    load();
+    const intervalId = setInterval(load, NOTIFICATIONS_POLL_INTERVAL_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(intervalId);
+    };
+  }, [patientDID]);
+
+  return (
+    <Card title="Notifications" subtitle="What's happened to your data recently — pulled from your own signed audit trail.">
+      {error && <p className="text-sm text-red-600">{error}</p>}
+      {!error && notifications.length === 0 && (
+        <p className="text-sm text-gray-400">Nothing yet — activity on your records will show up here.</p>
+      )}
+      <ul className="space-y-2">
+        {notifications.map((n) => (
+          <li key={n.eventId} className="rounded-lg border border-gray-100 p-3 text-sm">
+            <p className="text-gray-700">{n.message}</p>
+            <p className="mt-0.5 text-xs text-gray-400">{new Date(n.timestamp).toLocaleString()}</p>
+          </li>
+        ))}
+      </ul>
+    </Card>
   );
 }
 

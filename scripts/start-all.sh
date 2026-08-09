@@ -218,5 +218,12 @@ for entry in "dwn:5050" "gov:4000" "ha:4006" "doctor:4002" "pharmacy:4004" "sss:
 done
 
 echo ""
+log "${BOLD}Open MediTrust in your browser:${NC}"
+echo "  http://localhost:3001"
+if [ -n "$CURRENT_IP" ]; then
+  echo "  http://$CURRENT_IP:3001  (from a phone on the same network)"
+fi
+
+echo ""
 echo "Logs: $LOG_DIR/<service>.log   PIDs: $LOG_DIR/<service>.pid"
 echo "To stop everything: npm run stop:all"
