@@ -39,3 +39,8 @@ base.apk
 
 # Bifold wallet fork (separate upstream project, built from source to test the genesis fix)
 wallet/
+benchmark/figures/venv/
+
+# Local session notes for Claude (kept on disk, not tracked)
+CLAUDE.md
+CONTEXT.md
