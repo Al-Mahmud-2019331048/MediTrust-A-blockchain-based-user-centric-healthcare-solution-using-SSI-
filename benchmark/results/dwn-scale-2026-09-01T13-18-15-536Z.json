@@ -1,0 +1,38 @@
+{
+  "levels": [
+    {
+      "level": 500,
+      "avgMs": 3823.3,
+      "p95Ms": 5143.1,
+      "throughputReqPerSec": 32,
+      "errorRatePct": 66.67,
+      "runs": [
+        {
+          "avgMs": 11470,
+          "p95Ms": 15429.3,
+          "throughputReqPerSec": 96.1,
+          "errorRatePct": 0,
+          "failures": 0
+        },
+        {
+          "avgMs": 0,
+          "p95Ms": 0,
+          "throughputReqPerSec": 0,
+          "errorRatePct": 100,
+          "failures": 500
+        },
+        {
+          "avgMs": 0,
+          "p95Ms": 0,
+          "throughputReqPerSec": 0,
+          "errorRatePct": 100,
+          "failures": 500
+        }
+      ]
+    }
+  ],
+  "repeatsPerLevel": 3,
+  "workloadPerUser": "storeRecord (write) + self-read queryRecord + shareRecord (grant one field to a second synthetic DID)",
+  "note": "No ledger, no AnonCreds/Askar native bindings touched — pure DWN HTTP + LevelDB + SQLite audit log. Each simulated user is a distinct patientDID, so per-patientDID rate limits are never triggered regardless of level.",
+  "generatedAt": "2026-09-01T13:18:15.536Z"
+}

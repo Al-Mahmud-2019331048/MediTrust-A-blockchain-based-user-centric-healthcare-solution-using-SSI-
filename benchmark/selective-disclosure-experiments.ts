@@ -1,5 +1,4 @@
-import { BaseAgent } from '../agents/shared/agent-base';
-import { createTestPatientAgent, connectTestPatientTo, pollUntil, isReachable } from './test-patient-helper';
+import { createTestPatientAgent, connectTestPatientTo, pollUntil, isReachable, waitForNewCredentialDone } from './test-patient-helper';
 
 const GOV_URL = `http://localhost:${process.env.GOVERNMENT_API_PORT || '4000'}`;
 
@@ -11,7 +10,9 @@ export interface ExperimentResult {
   detail: string;
 }
 
-async function issueRealCredential(connectionId: string, label: string): Promise<boolean> {
+// Exported (not just used internally) so benchmark/anoncreds-concurrency-ceiling.ts
+// can reuse this exact, already-proven-correct issuance call instead of duplicating it.
+export async function issueRealCredential(connectionId: string, label: string): Promise<boolean> {
   const issueRes = await fetch(`${GOV_URL}/issue-credential`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -22,36 +23,8 @@ async function issueRealCredential(connectionId: string, label: string): Promise
   return issueRes.ok && issueBody.success && !issueBody.isW3C;
 }
 
-// Sending a proof request immediately after /issue-credential returns is a
-// race: that HTTP call only reflects the OFFER being sent, not the holder
-// having actually stored the credential (offer-received -> request-sent ->
-// credential-received -> done all still have to happen over real DIDComm).
-// A proof request that arrives before "done" finds zero matching credentials
-// and getCredentialsForAnonCredsProofRequest throws "Unable to automatically
-// select requested attributes." — confirmed exactly this way in an earlier
-// run. Polling the holder's OWN in-process credential record (rather than
-// guessing a fixed sleep) removes the race outright.
-//
-// Deliberately does NOT filter by connectionId: each side of a DIDComm
-// connection keeps its own separate local connection record (and thus its
-// own local ID) for the same logical pairwise relationship — the
-// connectionId returned by connectTestPatientTo() is government-agent's own
-// ID for the connection, which never matches the holder's local
-// credential-record connectionId. Confirmed by direct inspection (a debug
-// script logging real record contents). Since credential issuance in this
-// benchmark is always done one connection at a time, sequentially, waiting
-// for "one more done record than before" is unambiguous and avoids the
-// cross-party ID mismatch entirely.
-async function waitForNewCredentialDone(testPatient: BaseAgent, alreadyDoneIds: Set<string>, timeoutMs = 15000): Promise<string | undefined> {
-  const start = Date.now();
-  while (Date.now() - start < timeoutMs) {
-    const records: any[] = await testPatient.getIssuedCredentialRecords();
-    const newDone = records.find((r) => r.state === 'done' && !alreadyDoneIds.has(r.id));
-    if (newDone) return newDone.id;
-    await new Promise((r) => setTimeout(r, 300));
-  }
-  return undefined;
-}
+// waitForNewCredentialDone() is now shared from ./test-patient-helper — see
+// that file for the race-condition explanation this depends on.
 
 // Sends one proof request (selective-disclosure, no-predicate selective, or
 // full-reveal) and returns the round-trip latency plus the real serialized
@@ -59,7 +32,8 @@ async function waitForNewCredentialDone(testPatient: BaseAgent, alreadyDoneIds: 
 // (proof-status/proof-data) and the revealAll/noPredicate options on
 // /send-proof-request (agents/shared/common-routes.ts) had to be added for
 // this to work at all; none of it existed before this experiment.
-async function runProofRoundTrip(
+// Exported for the same reason as issueRealCredential above.
+export async function runProofRoundTrip(
   connectionId: string,
   label: string,
   revealAll: boolean,
@@ -99,9 +73,9 @@ function blockedPair(payloadName: string, latencyName: string, detail: string): 
 // Experiment: payload-size reduction and latency cost of AnonCreds selective
 // disclosure vs. a full-attribute reveal of the same credential, over the
 // same connection — measured two ways:
-//   1. Selective (3 attrs + age predicate) vs. full (8 attrs) — this
+//   1. Selective (3 attrs + age predicate) vs. full (5 attrs) — this
 //      project's actual selective-disclosure mechanism, predicate included.
-//   2. Selective (3 attrs, NO predicate) vs. full (8 attrs) — isolates just
+//   2. Selective (3 attrs, NO predicate) vs. full (5 attrs) — isolates just
 //      "fewer attributes revealed" from "a ZK predicate was also involved",
 //      since a predicate's own range-proof cost can dominate and invert the
 //      first comparison's direction (confirmed: it does, see #1's results).
@@ -150,7 +124,7 @@ export async function runSelectiveDisclosurePayloadAndLatency(): Promise<Experim
           metric: '%',
           status: 'ok',
           value: Number(reductionPct.toFixed(2)),
-          detail: `Selective proof (3 attrs + age predicate): ${selective.bytes} bytes. Full-reveal proof (all 8 attrs): ${full.bytes} bytes. Real AnonCreds presentations fetched via /proof-data.`,
+          detail: `Selective proof (3 attrs + age predicate): ${selective.bytes} bytes. Full-reveal proof (all 5 attrs): ${full.bytes} bytes. Real AnonCreds presentations fetched via /proof-data.`,
         },
         {
           name: latencyName,
@@ -173,7 +147,7 @@ export async function runSelectiveDisclosurePayloadAndLatency(): Promise<Experim
           metric: '%',
           status: 'ok',
           value: Number(reductionPctNoPred.toFixed(2)),
-          detail: `Selective proof, no predicate (3 attrs only): ${selectiveNoPred.bytes} bytes. Full-reveal proof (all 8 attrs): ${full.bytes} bytes. Isolates attribute-count reduction from predicate cost.`,
+          detail: `Selective proof, no predicate (3 attrs only): ${selectiveNoPred.bytes} bytes. Full-reveal proof (all 5 attrs): ${full.bytes} bytes. Isolates attribute-count reduction from predicate cost.`,
         },
         {
           name: latencyNameNoPred,

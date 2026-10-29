@@ -25,18 +25,19 @@ selfCustodyRouter.param('patientDID', (req: Request, res: Response, next, value:
 
 // POST /dwn/patients/:patientDID/self-custody/initiate
 // Fetches (or creates, on first use) this patient's real MEK and splits it
-// 3 ways (threshold 2) across things only the patient owns. The 3 shares are
+// 5 ways (threshold 3) across things only the patient owns. The 5 shares are
 // returned in the response and NOT persisted anywhere on the server — the
 // caller (the patient's own app) is responsible for saving each one wherever
 // the patient chooses (phone storage, a printed paper backup, a second
-// device). This is what makes it self-custody rather than institutional.
+// device, an encrypted cloud backup, a safe-deposit box). This is what makes
+// it self-custody rather than institutional.
 selfCustodyRouter.post('/patients/:patientDID/self-custody/initiate', async (req: Request, res: Response) => {
   try {
     const { patientDID } = req.params;
     if (!patientDID) return res.status(400).json({ error: 'patientDID is required' });
 
     const { mek, isNewPatient } = await getOrCreateMEK(patientDID);
-    const { shares, splitTimeMs, threshold, total } = await splitMEKSelfCustody(mek);
+    const { shares, splitTimeMs, threshold, total } = await splitMEKSelfCustody(mek, patientDID);
 
     // Self-custody is the patient's own action — signed with the patient's
     // own key (Operation Fullbring gap-closure), not the shared audit secret.
@@ -67,7 +68,7 @@ selfCustodyRouter.post('/patients/:patientDID/self-custody/initiate', async (req
 });
 
 // POST /dwn/patients/:patientDID/self-custody/restore
-// Body: { shares: SelfCustodyShare[] } — at least 2 of the patient's 3
+// Body: { shares: SelfCustodyShare[] } — at least 3 of the patient's 5
 // self-held shares. Reconstructs the original MEK and persists it back into
 // normal-operation storage so the patient's (new or existing) device
 // resumes normal operation immediately, without needing to repeat recovery
@@ -78,8 +79,29 @@ selfCustodyRouter.post('/patients/:patientDID/self-custody/restore', async (req:
     if (!patientDID) return res.status(400).json({ error: 'patientDID is required' });
 
     const shares: SelfCustodyShare[] = req.body.shares;
-    if (!Array.isArray(shares) || shares.length < 2) {
-      return res.status(400).json({ error: 'At least 2 self-custody shares are required' });
+    if (!Array.isArray(shares) || shares.length < 3) {
+      return res.status(400).json({ error: 'At least 3 self-custody shares are required' });
+    }
+    // Found via fuzz testing (2026-08-12): malformed share shapes (wrong
+    // element type, non-string shareId/shareData) reached reconstructMEKSelfCustody()
+    // unchecked and threw raw internal errors from the shamir-secret-sharing
+    // library/Buffer APIs ("each share must be at least 2 bytes", "the first
+    // argument must be of type string...") as an unhandled 500, instead of a
+    // clean 400 for what is straightforwardly bad client input.
+    if (!shares.every((s) => s && typeof s === 'object' && typeof s.shareId === 'string' && typeof s.shareData === 'string')) {
+      return res.status(400).json({ error: 'Each share must be an object with string shareId and shareData fields' });
+    }
+
+    // Catches the single most likely real-world mistake with a clear
+    // message before spending any crypto work on it: pasting shares that
+    // belong to a DIFFERENT account. Older shares (minted before this field
+    // existed) have no patientDID to check — silently skipped rather than
+    // rejected, so previously-issued shares don't stop working.
+    const mismatched = shares.find((s) => s.patientDID && s.patientDID !== patientDID);
+    if (mismatched) {
+      return res.status(400).json({
+        error: `This share belongs to a different account (${mismatched.patientDID}), not ${patientDID}. Open that account instead, or use shares generated for this one.`,
+      });
     }
 
     // Each attempt triggers a real verifyMEKAgainstBackup() call, which
@@ -94,7 +116,16 @@ selfCustodyRouter.post('/patients/:patientDID/self-custody/restore', async (req:
     }
 
     const alreadyHadMEK = await hasMEK(patientDID);
-    const { mek, reconstructTimeMs } = await reconstructMEKSelfCustody(shares);
+    let mek: Buffer;
+    let reconstructTimeMs: number;
+    try {
+      ({ mek, reconstructTimeMs } = await reconstructMEKSelfCustody(shares));
+    } catch (err) {
+      // Any remaining library-level rejection (e.g. too many shares, a
+      // corrupted-but-string shareData blob) is still bad client input, not
+      // a server fault — see the shape-validation comment above.
+      return res.status(400).json({ error: `Invalid shares: ${(err as Error).message}` });
+    }
 
     // Verify the reconstructed key is actually correct before persisting it.
     // combine() mathematically produces SOME 32-byte output from any shares

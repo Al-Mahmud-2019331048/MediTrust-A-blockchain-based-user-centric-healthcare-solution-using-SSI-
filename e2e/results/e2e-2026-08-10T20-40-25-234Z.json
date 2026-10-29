@@ -1,0 +1,60 @@
+{
+  "steps": [
+    {
+      "step": "1. DID",
+      "status": "ok",
+      "detail": "Real, registered identities already exist: government=did:indy:bcovrin:test:734uMwddMmQ8WikLwkjw9E, doctor=did:indy:bcovrin:test:3zTsyNGwtXWjTP7DV4gxmR"
+    },
+    {
+      "step": "2. VC (identity issuance)",
+      "status": "ok",
+      "detail": "Real AnonCreds identity credential issued"
+    },
+    {
+      "step": "3. Doctor verifies + issues",
+      "status": "ok",
+      "detail": "Real AnonCreds medical credential issued to a real, proof-verified patientDID=e46113fd-ae23-482c-9d4f-9562a5516074, dwnRecordId=022c0d4a-55b0-421b-911d-4a3638488bbf"
+    },
+    {
+      "step": "4. DWN write confirmation",
+      "status": "ok",
+      "detail": "Self-read confirms the record is genuinely in the DWN with matching data (recordId=022c0d4a-55b0-421b-911d-4a3638488bbf)"
+    },
+    {
+      "step": "5. shareRecord",
+      "status": "blocked",
+      "detail": "Grant failed: {\"error\":\"patientDID, grantedToDID, recordType, purpose, and nonce are required\"}"
+    },
+    {
+      "step": "6. Selective read",
+      "status": "blocked",
+      "detail": "Unexpected fields: []"
+    },
+    {
+      "step": "7a. Real proof exchange attempt",
+      "status": "ok",
+      "detail": "Real AnonCreds proof verified on the same connection established in step 3 (id=7e142e41-ec02-4ce5-a837-93e211e7bea9)"
+    },
+    {
+      "step": "7b. VP generation mechanism (synthetic proof)",
+      "status": "ok",
+      "detail": "VP generated and signed from a synthetic AnonCreds proof object (mechanism verified; not a live ZKP — see step 7a)"
+    },
+    {
+      "step": "8. revokeAccess",
+      "status": "blocked",
+      "detail": "Prerequisite steps did not complete"
+    },
+    {
+      "step": "9. Audit integrity (positive case)",
+      "status": "ok",
+      "detail": "4 audit events recorded for this run's patientDID, all verify()=true (Day 18's attack sim already proved the tampered/negative case)"
+    },
+    {
+      "step": "10. Integrity VC verification",
+      "status": "na",
+      "detail": "Not applicable — DWNRecord.integrityVCId is a documented, deferred placeholder (local-placeholder-{uuid}), not yet a real on-chain Indy VC. See CLAUDE.md Known Constraints."
+    }
+  ],
+  "generatedAt": "2026-08-10T20:40:25.234Z"
+}

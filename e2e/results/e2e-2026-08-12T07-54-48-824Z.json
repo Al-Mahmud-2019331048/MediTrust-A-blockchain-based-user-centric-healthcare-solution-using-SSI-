@@ -1,0 +1,60 @@
+{
+  "steps": [
+    {
+      "step": "1. DID",
+      "status": "ok",
+      "detail": "Real, registered identities already exist: government=did:indy:bcovrin:test:734uMwddMmQ8WikLwkjw9E, doctor=did:indy:bcovrin:test:3zTsyNGwtXWjTP7DV4gxmR"
+    },
+    {
+      "step": "2. VC (identity issuance)",
+      "status": "ok",
+      "detail": "Real AnonCreds identity credential issued"
+    },
+    {
+      "step": "3. Doctor verifies + issues",
+      "status": "ok",
+      "detail": "Real AnonCreds medical credential issued to a real, proof-verified patientDID=6d2b984c-e4c9-4552-95ea-39db48120adc, dwnRecordId=e452d337-c222-4286-97d5-e98f61786a83"
+    },
+    {
+      "step": "4. DWN write confirmation",
+      "status": "ok",
+      "detail": "Self-read confirms the record is genuinely in the DWN with matching data (recordId=e452d337-c222-4286-97d5-e98f61786a83)"
+    },
+    {
+      "step": "5. shareRecord",
+      "status": "blocked",
+      "detail": "Grant failed: {\"error\":\"patientDID, grantedToDID, recordType, purpose, and nonce are required\"}"
+    },
+    {
+      "step": "6. Selective read",
+      "status": "blocked",
+      "detail": "Unexpected fields: []"
+    },
+    {
+      "step": "7a. Real proof exchange attempt",
+      "status": "ok",
+      "detail": "Real AnonCreds proof verified on the same connection established in step 3 (id=790cbe31-5621-4894-96e9-9c9697328af4)"
+    },
+    {
+      "step": "7b. VP generation mechanism (synthetic proof)",
+      "status": "ok",
+      "detail": "VP generated and signed from a synthetic AnonCreds proof object (mechanism verified; not a live ZKP — see step 7a)"
+    },
+    {
+      "step": "8. revokeAccess",
+      "status": "blocked",
+      "detail": "Prerequisite steps did not complete"
+    },
+    {
+      "step": "9. Audit integrity (positive case)",
+      "status": "ok",
+      "detail": "7 audit events recorded for this run's patientDID, all verify()=true (Day 18's attack sim already proved the tampered/negative case)"
+    },
+    {
+      "step": "10. Integrity VC verification",
+      "status": "ok",
+      "detail": "Real on-chain anchor confirmed: integrityVCId=indy-anchor-txn-3241733, docHash=849ba6b6e1a507424f7470bab6a3dee407c732331f0371b18ac889fcd68d0e82"
+    }
+  ],
+  "generatedAt": "2026-08-12T07:54:48.824Z"
+}

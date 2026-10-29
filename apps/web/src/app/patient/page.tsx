@@ -274,12 +274,16 @@ const HOLDER_LABELS: Record<SelfCustodyShare['holder'], string> = {
   primary_device: 'Your phone',
   paper_backup: 'Printed paper backup',
   secondary_device: 'A second device',
+  cloud_backup: 'Your own cloud backup',
+  safe_deposit_box: 'Safe deposit box',
 };
 
 const HOLDER_INSTRUCTIONS: Record<SelfCustodyShare['holder'], string> = {
   primary_device: 'Save this on your phone — e.g. in a notes app or password manager.',
   paper_backup: 'Print this or write it down, and store it somewhere safe, like a drawer or a safe.',
   secondary_device: 'Save this on a second device you own — a tablet, laptop, or another phone.',
+  cloud_backup: 'Save this in your own encrypted cloud storage or password manager (e.g. iCloud, a private cloud drive).',
+  safe_deposit_box: 'Print this or write it down and store it in a safe deposit box or other secure physical location.',
 };
 
 function ShareCard({ share }: { share: SelfCustodyShare }) {
@@ -319,6 +323,12 @@ function ShareCard({ share }: { share: SelfCustodyShare }) {
         </button>
       </div>
       <p className="mt-1 text-xs text-gray-500">{HOLDER_INSTRUCTIONS[share.holder]}</p>
+      {share.patientDID && (
+        <p className="mt-1 text-[11px] text-gray-400">
+          Account: <span className="font-mono">{share.patientDID}</span> — this ID is saved with the share, so you
+          don&rsquo;t need to remember it separately.
+        </p>
+      )}
       <textarea
         readOnly
         value={text}
@@ -335,13 +345,17 @@ function isValidShare(value: unknown): value is SelfCustodyShare {
     typeof v.shareId === 'string' &&
     typeof v.shareIndex === 'number' &&
     typeof v.shareData === 'string' &&
-    (v.holder === 'primary_device' || v.holder === 'paper_backup' || v.holder === 'secondary_device')
+    (v.holder === 'primary_device' ||
+      v.holder === 'paper_backup' ||
+      v.holder === 'secondary_device' ||
+      v.holder === 'cloud_backup' ||
+      v.holder === 'safe_deposit_box')
   );
 }
 
 function RestoreShareBox({
-  index, value, onChange,
-}: { index: number; value: string; onChange: (v: string) => void }) {
+  index, value, onChange, currentPatientDID,
+}: { index: number; value: string; onChange: (v: string) => void; currentPatientDID: string }) {
   let parsed: SelfCustodyShare | null = null;
   let invalid = false;
   if (value.trim()) {
@@ -354,6 +368,10 @@ function RestoreShareBox({
     }
   }
 
+  // Older shares (minted before patientDID was added) have nothing to check
+  // — only flag a REAL, known mismatch, never a missing field.
+  const wrongAccount = !!(parsed && parsed.patientDID && parsed.patientDID !== currentPatientDID);
+
   return (
     <div className="mb-2">
       <textarea
@@ -361,15 +379,17 @@ function RestoreShareBox({
         onChange={(e) => onChange(e.target.value)}
         placeholder={`Paste share ${index + 1} here`}
         className={`h-16 w-full resize-none rounded-lg border p-2 font-mono text-[10px] outline-none focus:ring-2 ${
-          parsed ? 'border-emerald-300 focus:ring-emerald-400' : invalid ? 'border-red-300 focus:ring-red-400' : 'border-gray-200 focus:ring-violet-400'
+          wrongAccount ? 'border-red-300 focus:ring-red-400' : parsed ? 'border-emerald-300 focus:ring-emerald-400' : invalid ? 'border-red-300 focus:ring-red-400' : 'border-gray-200 focus:ring-violet-400'
         }`}
       />
-      <p className={`mt-0.5 text-[11px] ${parsed ? 'text-emerald-600' : invalid ? 'text-red-500' : 'text-gray-400'}`}>
-        {parsed
-          ? `✓ Recognized — ${HOLDER_LABELS[parsed.holder]}`
-          : invalid
-            ? '✗ Not a recognizable share — check you copied the whole thing'
-            : 'Waiting for a share…'}
+      <p className={`mt-0.5 text-[11px] ${wrongAccount ? 'text-red-500' : parsed ? 'text-emerald-600' : invalid ? 'text-red-500' : 'text-gray-400'}`}>
+        {wrongAccount
+          ? `✗ This share belongs to a different account (${parsed!.patientDID}) — open that account instead`
+          : parsed
+            ? `✓ Recognized — ${HOLDER_LABELS[parsed.holder]}`
+            : invalid
+              ? '✗ Not a recognizable share — check you copied the whole thing'
+              : 'Waiting for a share…'}
       </p>
     </div>
   );
@@ -407,7 +427,7 @@ function SigningKeySection({ patientDID }: { patientDID: string }) {
 function KeyRecoveryPanel({ patientDID }: { patientDID: string }) {
   const [hasMEK, setHasMEK] = useState<boolean | null>(null);
   const [shares, setShares] = useState<SelfCustodyShare[] | null>(null);
-  const [restoreInput, setRestoreInput] = useState(['', '']);
+  const [restoreInput, setRestoreInput] = useState(['', '', '']);
   const [status, setStatus] = useState<string | null>(null);
   const [restoring, setRestoring] = useState(false);
 
@@ -440,7 +460,8 @@ function KeyRecoveryPanel({ patientDID }: { patientDID: string }) {
   // Distinct shareIds only — pasting the same share into both boxes shouldn't
   // count as 2 toward the threshold.
   const distinctValidCount = new Set(validShares.map((s) => s.shareId)).size;
-  const canRestore = distinctValidCount >= 2;
+  const hasWrongAccountShare = validShares.some((s) => s.patientDID && s.patientDID !== patientDID);
+  const canRestore = distinctValidCount >= 3 && !hasWrongAccountShare;
 
   const restore = async () => {
     if (!canRestore) return;
@@ -462,7 +483,7 @@ function KeyRecoveryPanel({ patientDID }: { patientDID: string }) {
   return (
     <Card
       title="Key recovery & backup"
-      subtitle="Self-custody: your key is split 3 ways across your own devices/paper backup — any 2 recover it. Your data is backed up incrementally on every write."
+      subtitle="Self-custody: your key is split 5 ways across your own devices/paper backup/cloud/safe deposit box — any 3 recover it. Your data is backed up incrementally on every write."
     >
       <p className="mb-4 text-sm">
         Local key status:{' '}
@@ -480,12 +501,12 @@ function KeyRecoveryPanel({ patientDID }: { patientDID: string }) {
             onClick={setup}
             className="rounded-lg bg-violet-600 px-4 py-2 text-sm font-medium text-white transition-colors duration-200 hover:bg-violet-700"
           >
-            Generate 3 recovery shares
+            Generate 5 recovery shares
           </button>
           {shares && (
             <>
               <p className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-xs font-medium text-amber-700">
-                You won&rsquo;t be able to see these again after leaving this page — copy or save all 3 now.
+                You won&rsquo;t be able to see these again after leaving this page — copy or save all 5 now.
               </p>
               <ul className="mt-3 space-y-2">
                 {shares.map((s) => (
@@ -504,9 +525,10 @@ function KeyRecoveryPanel({ patientDID }: { patientDID: string }) {
               index={i}
               value={val}
               onChange={(v) => setRestoreInput((prev) => prev.map((p, j) => (j === i ? v : p)))}
+              currentPatientDID={patientDID}
             />
           ))}
-          <p className="mb-2 text-xs text-gray-500">{distinctValidCount} of 2 minimum shares provided</p>
+          <p className="mb-2 text-xs text-gray-500">{distinctValidCount} of 3 minimum shares provided</p>
           <button
             onClick={restore}
             disabled={!canRestore || restoring}

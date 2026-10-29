@@ -1,14 +1,11 @@
 import { Express, Request, Response } from "express";
 import { BaseAgent } from "../../../shared/agent-base";
+import { AuditService } from "../../../../audit/src/services/audit-service";
 
 // Registers healthcare-authority agent routes. This agent sits between
 // government (which issues it a HospitalAuthorizationCredential) and doctors
 // (to whom it issues a ProfessionalRoleCredential) in the 3-tier chain —
 // closes the "no credential-backed proof a doctor is licensed" gap.
-// No AuditService.record() call here, matching the confirmed existing
-// behavior of government's /issue-credential and doctor's
-// /issue-medical-credential — neither audit-logs today, so this doesn't
-// invent a new convention just for this one route.
 export function registerHealthcareAuthorityRoutes(
   app: Express,
   agent: BaseAgent,
@@ -20,17 +17,25 @@ export function registerHealthcareAuthorityRoutes(
   // definition isn't real yet, same pattern as doctor's
   // /issue-medical-credential fallback.
   app.post("/issue-role-credential", async (req: Request, res: Response) => {
-    const { connectionId, role, licenseId, issuedAt } = req.body;
+    const { connectionId, role, licenseNumber, specialization, hospitalAffiliation, validityPeriod } = req.body;
 
     if (!connectionId) return res.status(400).json({ error: "connectionId is required" });
-    if (!role || !licenseId) {
-      return res.status(400).json({ error: "role and licenseId are required" });
+    if (!role || !licenseNumber) {
+      return res.status(400).json({ error: "role and licenseNumber are required" });
     }
+
+    // validityPeriod is an ISO 8601 interval ("start/end"); defaults to one
+    // year from issuance when the caller doesn't supply one.
+    const validFrom = new Date();
+    const validUntil = new Date(validFrom);
+    validUntil.setFullYear(validUntil.getFullYear() + 1);
 
     const attributesData = {
       role,
-      licenseId,
-      issuedAt: issuedAt || new Date().toISOString(),
+      licenseNumber,
+      specialization: specialization || "Not specified",
+      hospitalAffiliation: hospitalAffiliation || "Not specified",
+      validityPeriod: validityPeriod || `${validFrom.toISOString()}/${validUntil.toISOString()}`,
     };
 
     const credDefId = getCredDefId();
@@ -46,6 +51,15 @@ export function registerHealthcareAuthorityRoutes(
       }, null, 2);
       try {
         const result = await agent.sendMessage(connectionId, msg);
+        await AuditService.record({
+          eventType: "credential_issued",
+          actorDid: agentDid,
+          targetDid: connectionId,
+          resourceId: result.id,
+          resourceType: "professional_role_credential",
+          action: "issueAnonCredsCredential",
+          metadata: { connectionId, role, licenseNumber, isW3C: true },
+        });
         return res.status(200).json({
           success: true,
           credentialId: result.id,
@@ -59,6 +73,15 @@ export function registerHealthcareAuthorityRoutes(
     try {
       const attributes = Object.entries(attributesData).map(([name, value]) => ({ name, value: String(value) }));
       const result = await agent.issueAnonCredsCredential(connectionId, credDefId, attributes);
+      await AuditService.record({
+        eventType: "credential_issued",
+        actorDid: agentDid,
+        targetDid: connectionId,
+        resourceId: result.id,
+        resourceType: "professional_role_credential",
+        action: "issueAnonCredsCredential",
+        metadata: { connectionId, role, licenseNumber, isW3C: false },
+      });
       res.status(200).json({ success: true, credentialExchangeId: result.id, state: result.state });
     } catch (error) {
       res.status(500).json({ error: error.message });

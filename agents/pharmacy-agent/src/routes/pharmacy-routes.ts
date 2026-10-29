@@ -89,7 +89,7 @@ export function registerPharmacyRoutes(
 
       const requestAttributes = {
         prescription_info: {
-          names: ["documentId", "documentType", "documentHash", "patientName", "diagnosis", "prescription", "issuedBy", "issuedAt"],
+          names: ["documentId", "documentType", "documentHash", "diagnosis", "prescription", "issuerDid", "issuedAt"],
           restrictions: [{ cred_def_id: doctorCredDefId }],
         },
       };

@@ -5,10 +5,42 @@ import { AuditService } from '../../../../audit/src/services/audit-service';
 
 export const protocolRouter = Router();
 
+// Protocol.allowedFields is the system-wide, role-based field-redaction cap
+// intersected against every patient's individual grants (see
+// record-routes.ts's queryRecord) — e.g. the real "Prescription"/
+// "pharmacist" entry currently limits every pharmacist, for every patient,
+// to seeing only the "drug" field. /define had no auth check at all before
+// this: found via 2026-08-12 stress testing that ANY caller could silently
+// widen or overwrite that system-wide policy with a single unauthenticated
+// POST — no patient consent, no role proof, nothing. There is no admin/
+// operator auth system in this PoC, so this uses the same shared-secret
+// pattern already established for signing secrets (DOCUMENT_SIGNING_SECRET
+// etc. in .env) rather than inventing a new one. Unset env var fails closed
+// (503), matching this codebase's existing convention for security-critical
+// config (see common-routes.ts's credDef checks) — never silently
+// unauthenticated.
+function requireAdminSecret(req: Request, res: Response): boolean {
+  const configured = process.env.PROTOCOL_ADMIN_SECRET;
+  if (!configured) {
+    res.status(503).json({ error: 'Protocol administration is not configured (PROTOCOL_ADMIN_SECRET is unset) — refusing to allow an unauthenticated policy change.' });
+    return false;
+  }
+  const provided = req.header('x-admin-secret');
+  if (provided !== configured) {
+    res.status(401).json({ error: 'Missing or incorrect x-admin-secret header' });
+    return false;
+  }
+  return true;
+}
+
 // POST /dwn/protocols/define — mounted at /dwn/protocols/* by server.ts (Day 13)
 // Body: { name, actorRole, allowedFields }
+// Header: x-admin-secret (must match PROTOCOL_ADMIN_SECRET) — see
+// requireAdminSecret() above.
 protocolRouter.post('/define', async (req: Request, res: Response) => {
   try {
+    if (!requireAdminSecret(req, res)) return;
+
     const { name, actorRole, allowedFields } = req.body;
 
     if (!name || !actorRole || !allowedFields) {
@@ -16,7 +48,18 @@ protocolRouter.post('/define', async (req: Request, res: Response) => {
         error: 'name, actorRole, and allowedFields are required',
       });
     }
-    if (!Array.isArray(allowedFields)) {
+    // Found alongside the auth gap above: a non-string name/actorRole passed
+    // this bare truthiness check, got persisted, and then crashed the
+    // audit-log write with an unhandled 500 (Prisma's schema requires a
+    // String column) — same bug pattern as storeRecord/shareRecord, see
+    // their identical fixes in record-routes.ts/permission-routes.ts.
+    if (typeof name !== 'string') {
+      return res.status(400).json({ error: 'name must be a string' });
+    }
+    if (typeof actorRole !== 'string') {
+      return res.status(400).json({ error: 'actorRole must be a string' });
+    }
+    if (!Array.isArray(allowedFields) || !allowedFields.every((f) => typeof f === 'string')) {
       return res.status(400).json({ error: 'allowedFields must be an array of strings' });
     }
 

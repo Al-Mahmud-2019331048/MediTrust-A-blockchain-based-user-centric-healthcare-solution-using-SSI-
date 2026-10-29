@@ -1,0 +1,98 @@
+{
+  "levels": [
+    {
+      "level": 200,
+      "avgMs": 4997,
+      "p95Ms": 5346.3,
+      "throughputReqPerSec": 112.1,
+      "errorRatePct": 0,
+      "runs": [
+        {
+          "avgMs": 4718.8,
+          "p95Ms": 5609.8,
+          "throughputReqPerSec": 106.5,
+          "errorRatePct": 0,
+          "failures": 0
+        },
+        {
+          "avgMs": 5004.4,
+          "p95Ms": 5041.8,
+          "throughputReqPerSec": 118.6,
+          "errorRatePct": 0,
+          "failures": 0
+        },
+        {
+          "avgMs": 5267.7,
+          "p95Ms": 5387.4,
+          "throughputReqPerSec": 111.1,
+          "errorRatePct": 0,
+          "failures": 0
+        }
+      ]
+    },
+    {
+      "level": 400,
+      "avgMs": 0,
+      "p95Ms": 0,
+      "throughputReqPerSec": 0,
+      "errorRatePct": 100,
+      "runs": [
+        {
+          "avgMs": 0,
+          "p95Ms": 0,
+          "throughputReqPerSec": 0,
+          "errorRatePct": 100,
+          "failures": 400
+        },
+        {
+          "avgMs": 0,
+          "p95Ms": 0,
+          "throughputReqPerSec": 0,
+          "errorRatePct": 100,
+          "failures": 400
+        },
+        {
+          "avgMs": 0,
+          "p95Ms": 0,
+          "throughputReqPerSec": 0,
+          "errorRatePct": 100,
+          "failures": 400
+        }
+      ]
+    },
+    {
+      "level": 500,
+      "avgMs": 0,
+      "p95Ms": 0,
+      "throughputReqPerSec": 0,
+      "errorRatePct": 100,
+      "runs": [
+        {
+          "avgMs": 0,
+          "p95Ms": 0,
+          "throughputReqPerSec": 0,
+          "errorRatePct": 100,
+          "failures": 500
+        },
+        {
+          "avgMs": 0,
+          "p95Ms": 0,
+          "throughputReqPerSec": 0,
+          "errorRatePct": 100,
+          "failures": 500
+        },
+        {
+          "avgMs": 0,
+          "p95Ms": 0,
+          "throughputReqPerSec": 0,
+          "errorRatePct": 100,
+          "failures": 500
+        }
+      ]
+    }
+  ],
+  "repeatsPerLevel": 3,
+  "workloadPerUser": "storeRecord (write) + self-read queryRecord + shareRecord (grant one field to a second synthetic DID)",
+  "note": "No ledger, no AnonCreds/Askar native bindings touched — pure DWN HTTP + LevelDB + SQLite audit log. Each simulated user is a distinct patientDID, so per-patientDID rate limits are never triggered regardless of level.",
+  "generatedAt": "2026-09-01T13:22:14.981Z"
+}

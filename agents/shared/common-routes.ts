@@ -31,17 +31,24 @@ export function registerCommonRoutes(
       // to compare payload size/latency against the normal 3-attribute +
       // age-predicate request below. Never used by the doctor/pharmacy
       // portals — opt-in only, so default proof-request behavior for every
-      // existing caller is unchanged.
+      // existing caller is unchanged. Field list matches the CORE identity
+      // credential's schema (5 attrs) since the 2026-08 data-minimization
+      // split moved medicalCondition/bloodType/emergencyContact to a
+      // separate extended-profile credential this proof request never
+      // touches — see government-agent/server.ts.
       requestAttributes = {
         name: {
-          names: ["name", "age", "email", "nationalId", "medicalCondition", "bloodType", "emergencyContact", "patientAccountId"],
+          names: ["name", "age", "email", "nationalId", "patientAccountId"],
           restrictions: [{ cred_def_id: config.credentialDefinitionId }],
         },
       };
     } else if (config.agentType === "--issuer") {
+      // 3 of the core credential's 5 attributes — deliberately NOT
+      // medicalCondition/bloodType, which no longer live on this credential
+      // at all post-split (see above).
       requestAttributes = {
         name: {
-          names: ["nationalId", "medicalCondition", "bloodType"],
+          names: ["nationalId", "email", "patientAccountId"],
           restrictions: [{ cred_def_id: config.credentialDefinitionId }],
         },
       };
@@ -106,17 +113,25 @@ export function registerCommonRoutes(
       };
     } else if (config.agentType === "--pharmacist") {
       // Same fail-open risk as --doctor above: an unset env var must not
-      // silently accept any issuer (found 2026-08-09 re-audit).
-      const governmentCredDefId = process.env.GOVERNMENT_MEDICAL_CRED_DEF_ID;
-      if (!governmentCredDefId) {
+      // silently accept any issuer (found 2026-08-09 re-audit). This checks
+      // DOCTOR_MEDICAL_CRED_DEF_ID (the doctor's own credDef, since a
+      // medical_document_credential is doctor-issued, not government-issued)
+      // — a stress-test pass (2026-08-12) found this previously read
+      // GOVERNMENT_MEDICAL_CRED_DEF_ID, a var no agent in this system ever
+      // sets, which made this branch permanently 503 regardless of config.
+      // Currently unreachable from any real UI flow (pharmacy/page.tsx uses
+      // pharmacy-routes.ts's own /verify-prescription, which already read
+      // the correct var), but fixed for correctness/future callers.
+      const doctorCredDefId = process.env.DOCTOR_MEDICAL_CRED_DEF_ID;
+      if (!doctorCredDefId) {
         return res.status(503).send({
-          error: "Document verification is not configured (GOVERNMENT_MEDICAL_CRED_DEF_ID is unset) — refusing to send an unrestricted proof request.",
+          error: "Document verification is not configured (DOCTOR_MEDICAL_CRED_DEF_ID is unset) — refusing to send an unrestricted proof request.",
         });
       }
       requestAttributes = {
         name: {
-          names: ["documentId", "documentType", "documentHash", "issuedBy", "issuedAt"],
-          restrictions: governmentCredDefId ? [{ cred_def_id: governmentCredDefId }] : [],
+          names: ["documentId", "documentType", "documentHash", "issuerDid", "issuedAt"],
+          restrictions: [{ cred_def_id: doctorCredDefId }],
         },
       };
     } else if (config.agentType === "--healthcare-authority") {
@@ -128,7 +143,7 @@ export function registerCommonRoutes(
       const professionalRoleCredDefId = process.env.PROFESSIONAL_ROLE_CRED_DEF_ID || config.credentialDefinitionId;
       requestAttributes = {
         role_info: {
-          names: ["role", "licenseId"],
+          names: ["role", "licenseNumber"],
           restrictions: professionalRoleCredDefId ? [{ cred_def_id: professionalRoleCredDefId }] : [],
         },
       };

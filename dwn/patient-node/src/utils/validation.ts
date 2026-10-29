@@ -15,3 +15,28 @@ const UUID_V4_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}
 export function isValidPatientDID(patientDID: unknown): patientDID is string {
   return typeof patientDID === 'string' && UUID_V4_PATTERN.test(patientDID);
 }
+
+// recordType/contentType previously reached RecordsInterface.createRecord()
+// (and shareRecord's equivalent audit call) with only a truthiness check —
+// `!input.recordType` lets any truthy non-string (123, true, [], {}) through.
+// Found via fuzz testing (2026-08-12): a non-string value gets persisted as
+// the record's/permission's real recordType, and the audit write for that
+// same request then throws (Prisma's schema requires a String column),
+// surfacing as a misleading 500 AFTER the malformed write already
+// succeeded — the caller sees "failure" but the DWN is left holding a
+// corrupted record. Separately, a non-string contentType breaks the
+// `record.contentType === 'application/json'` identity check on read,
+// silently serving legitimate JSON back as opaque base64. Enumerated
+// against the real DWNRecord type (agents/shared/types/index.ts) rather
+// than just checking `typeof === 'string'`, since an arbitrary string
+// contentType would hit the exact same read-path bug.
+const VALID_RECORD_TYPES = ['medical', 'prescription', 'lab_report'] as const;
+const VALID_CONTENT_TYPES = ['application/json', 'application/pdf', 'image/jpeg', 'image/png'] as const;
+
+export function isValidRecordType(recordType: unknown): recordType is 'medical' | 'prescription' | 'lab_report' {
+  return typeof recordType === 'string' && (VALID_RECORD_TYPES as readonly string[]).includes(recordType);
+}
+
+export function isValidContentType(contentType: unknown): contentType is 'application/json' | 'application/pdf' | 'image/jpeg' | 'image/png' {
+  return typeof contentType === 'string' && (VALID_CONTENT_TYPES as readonly string[]).includes(contentType);
+}

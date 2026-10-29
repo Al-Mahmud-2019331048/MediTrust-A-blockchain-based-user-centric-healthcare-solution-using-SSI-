@@ -29,7 +29,7 @@ export default function GovernmentPortal() {
   const [connectionId, setConnectionId] = useState<string | null>(null);
   const [form, setForm] = useState<PatientForm>(EMPTY_FORM);
   const [issuing, setIssuing] = useState(false);
-  const [result, setResult] = useState<{ success: boolean; message: string; patientAccountId?: string } | null>(null);
+  const [result, setResult] = useState<{ success: boolean; message: string; patientAccountId?: string; extendedProfileIssued?: boolean } | null>(null);
 
   const handleChange = (field: keyof PatientForm) => (e: React.ChangeEvent<HTMLInputElement>) => {
     setForm((f) => ({ ...f, [field]: e.target.value }));
@@ -65,10 +65,14 @@ export default function GovernmentPortal() {
           (res.isW3C
             ? 'Identity credential sent (structured message fallback — no live AnonCreds credDef on this network).'
             : 'Identity credential issued via AnonCreds.') +
+          (res.extendedProfileCredentialId
+            ? ' Medical condition, blood type, and emergency contact were issued as a separate extended-profile credential, so identity checks alone can never receive them.'
+            : ' Note: the separate extended-profile credential (medical condition, blood type, emergency contact) was not issued this time — its credential definition was not available.') +
           (skippedAutoSave
             ? ' Note: a different patient ID was already saved in this browser, so it was NOT auto-loaded into the Patient Portal — copy the ID below manually if needed.'
             : ''),
         patientAccountId: res.patientAccountId,
+        extendedProfileIssued: Boolean(res.extendedProfileCredentialId),
       });
     } catch (err) {
       setResult({ success: false, message: (err as Error).message });

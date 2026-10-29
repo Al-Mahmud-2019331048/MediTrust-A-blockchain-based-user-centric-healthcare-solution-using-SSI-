@@ -75,8 +75,13 @@ export async function revokeAccess(input: { patientDID: string; grantedToDID: st
 export interface SelfCustodyShare {
   shareId: string;
   shareIndex: number;
-  holder: 'primary_device' | 'paper_backup' | 'secondary_device';
+  holder: 'primary_device' | 'paper_backup' | 'secondary_device' | 'cloud_backup' | 'safe_deposit_box';
   shareData: string;
+  // Which account this share belongs to — lets a patient identify the
+  // right account from their paper backup alone, without needing to
+  // separately remember a UUID. Optional so shares minted before this field
+  // existed still parse.
+  patientDID?: string;
 }
 
 export async function initiateSelfCustody(patientDID: string): Promise<{

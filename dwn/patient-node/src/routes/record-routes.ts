@@ -4,9 +4,12 @@ import { PermissionsInterface } from '../interfaces/permissions';
 import { ProtocolsInterface } from '../interfaces/protocols';
 import { backupWrite } from '../backup/backup-service';
 import { AuditService } from '../../../../audit/src/services/audit-service';
+import { attemptAnchor } from '../../../../audit/src/services/anchor-client';
 import { DWNRecord, Permission } from '../../../../agents/shared/types';
-import { isValidPatientDID } from '../utils/validation';
+import { isValidPatientDID, isValidRecordType, isValidContentType } from '../utils/validation';
 import { consumeNonce } from '../utils/nonce-guard';
+import { isRateLimited } from '../utils/rate-limit';
+import { sha256, sha256String } from '../../../../crypto/encryption/src/hash-utils';
 
 const BINARY_CONTENT_TYPES: DWNRecord['contentType'][] = [
   'application/pdf',
@@ -39,8 +42,52 @@ recordRouter.post('/storeRecord', async (req: Request, res: Response) => {
     if (!isValidPatientDID(patientDID)) {
       return res.status(400).json({ error: 'patientDID must be a valid UUID' });
     }
-    if (typeof nonce !== 'string' || !consumeNonce(nonce)) {
-      return res.status(409).json({ error: 'This nonce has already been used — possible replay, write rejected' });
+    // Found via fuzz testing (2026-08-12): a non-string recordType/protocol/
+    // contentType (a number, boolean, array, object) previously passed the
+    // bare truthiness check above, got persisted into the DWN as-is, and
+    // only THEN crashed the audit-log write with an unhandled 500 (Prisma's
+    // schema requires a String column) — the caller saw "failure" while the
+    // malformed record was actually already saved. A non-string contentType
+    // additionally breaks the `=== 'application/json'` check on read,
+    // silently serving real JSON back as opaque base64. See validation.ts
+    // for why these are checked against the real enum, not just typeof.
+    if (!isValidRecordType(recordType)) {
+      return res.status(400).json({ error: "recordType must be one of 'medical', 'prescription', 'lab_report'" });
+    }
+    if (!isValidContentType(contentType)) {
+      return res.status(400).json({ error: "contentType must be one of 'application/json', 'application/pdf', 'image/jpeg', 'image/png'" });
+    }
+    if (typeof protocol !== 'string' || !protocol) {
+      return res.status(400).json({ error: 'protocol must be a non-empty string' });
+    }
+    if (fileName !== undefined && fileName !== null && typeof fileName !== 'string') {
+      return res.status(400).json({ error: 'fileName must be a string' });
+    }
+    if (authorDID !== undefined && authorDID !== null && typeof authorDID !== 'string') {
+      return res.status(400).json({ error: 'authorDID must be a string' });
+    }
+    if (typeof nonce !== 'string') {
+      return res.status(400).json({ error: 'nonce must be a string' });
+    }
+    // storeRecord has no caller-identity check at all (writes are
+    // deliberately unauthenticated — see CLAUDE.md's "sovereignty enforced
+    // at the READ layer only"), and accepts up to a 25MB body with no
+    // throttling — found during 2026-08-12 stress testing to be a real,
+    // unbounded disk/memory-exhaustion vector against a single patientDID.
+    // Scoped per-patientDID (not global), same convention as the existing
+    // self-custody/mpoa rate limits — bounds repeated abuse of one patient's
+    // vault without touching legitimate multi-patient write throughput.
+    if (isRateLimited(`storeRecord:${patientDID}`, 30, 60_000)) {
+      return res.status(429).json({ error: 'Too many writes for this patient — try again in a minute.' });
+    }
+    const requestFingerprint = sha256String(JSON.stringify({ patientDID, recordType, protocol, contentType, fileName, data, authorDID }));
+    const { accepted, mismatchedReplay } = consumeNonce(nonce, requestFingerprint);
+    if (!accepted) {
+      return res.status(409).json({
+        error: mismatchedReplay
+          ? 'This nonce was already used for a different request — possible tampering, write rejected'
+          : 'This nonce has already been used — possible replay, write rejected',
+      });
     }
 
     const isBinary = BINARY_CONTENT_TYPES.includes(contentType);
@@ -84,6 +131,38 @@ recordRouter.post('/storeRecord', async (req: Request, res: Response) => {
       metadata: { encryptTimeMs, wrapTimeMs, fileSize: record.fileSize, contentType },
     });
 
+    // On-chain anchoring: best-effort, fire-and-forget — NOT awaited before
+    // responding, same reasoning as every other anchoring call site in this
+    // codebase (attemptAnchor()'s own 5s timeout would otherwise make every
+    // document write as slow as the ledger's — see permission-routes.ts for
+    // the live-regression numbers that established this pattern). Anchors
+    // record.hash directly — the same real SHA-256 already recomputed and
+    // compared on every read below — so integrityVCId (a documented,
+    // deferred placeholder) gets replaced with a real ledger transaction
+    // reference once this resolves, instead of staying fake forever.
+    //
+    // Re-pushes the now-anchored record to backup once markRecordAnchored()
+    // resolves — found live 2026-08-31 during a device-loss recovery drill
+    // that without this, the backup entry pushed below (at write time,
+    // necessarily before this async anchor resolves) permanently froze the
+    // pre-anchor placeholder: recovering the record later always brought
+    // the placeholder back, even if the original had a real anchor by the
+    // time the device was lost. Still fire-and-forget — a failed re-push
+    // just leaves backup one step behind the live copy, same best-effort
+    // treatment as the anchor itself.
+    attemptAnchor(record.hash)
+      .then((anchor) => RecordsInterface.markRecordAnchored(record.recordId, anchor))
+      .then((updatedRecord) => {
+        if (!updatedRecord) return;
+        return backupWrite({
+          entityType: 'record',
+          patientDID,
+          entityKey: `record:${updatedRecord.recordId}`,
+          entity: updatedRecord,
+        });
+      })
+      .catch(() => {});
+
     // Operation Fullbring: incremental backup — fires right after this
     // write succeeds, sending only this one new record (encrypted with the
     // patient's own MEK) to the configured backup destination.
@@ -118,6 +197,18 @@ recordRouter.get('/queryRecord', async (req: Request, res: Response) => {
 
     if (!requesterDID) {
       return res.status(400).json({ error: 'requesterDID is required' });
+    }
+    // Every real caller already knows which patient they're asking about
+    // (a self-read passes its own patientDID, a grant-based read passes the
+    // specific patientDID the grant is for) — recordId is the only other
+    // legitimate way to scope a query. Without this, patientDID and recordId
+    // both omitted meant a full, unauthenticated scan of every record for
+    // every patient in the DWN plus a permission-lookup per non-owned
+    // record — confirmed live during 2026-08-12 stress testing to cost real,
+    // unbounded server time (scaled linearly with total DB size) triggered
+    // by one unauthenticated GET with an arbitrary requesterDID.
+    if (!recordId && !patientDID) {
+      return res.status(400).json({ error: 'Either recordId or patientDID is required' });
     }
 
     let records: DWNRecord[];
@@ -185,8 +276,32 @@ recordRouter.get('/queryRecord', async (req: Request, res: Response) => {
 
     const results = [];
     const redactionsApplied: Record<string, string[]> = {};
+    const tamperedRecordIds: string[] = [];
     for (const record of authorized) {
       const { plaintext } = await RecordsInterface.decryptRecord(record);
+
+      // record.hash is the SHA-256 of the plaintext at write time — recomputed
+      // here and compared on every read. This is independent of AES-GCM's own
+      // auth tag (which only proves the ciphertext blob wasn't corrupted): a
+      // party with direct LevelDB write access could swap in a *different*,
+      // still-validly-encrypted blob under the same key, which the auth tag
+      // alone would not catch. A mismatch here is never served — the record is
+      // excluded from results and logged rather than silently returned.
+      const computedHash = sha256(plaintext);
+      if (computedHash !== record.hash) {
+        tamperedRecordIds.push(record.recordId);
+        await AuditService.record({
+          eventType: 'document_integrity_check_failed',
+          actorDid: requesterDID,
+          targetDid: record.patientDID,
+          resourceId: record.recordId,
+          resourceType: record.recordType,
+          action: 'readRecord',
+          metadata: { expectedHash: record.hash, computedHash },
+        });
+        continue;
+      }
+
       let data =
         record.contentType === 'application/json'
           ? JSON.parse(plaintext.toString('utf8'))
@@ -250,6 +365,12 @@ recordRouter.get('/queryRecord', async (req: Request, res: Response) => {
       results.push(accessPolicy ? { ...rest, data, accessPolicy } : { ...rest, data });
     }
 
+    if (recordId && tamperedRecordIds.length > 0) {
+      return res.status(409).json({
+        error: `Record ${recordId} failed integrity verification — its stored content does not match its recorded fingerprint. This may indicate tampering or corruption.`,
+      });
+    }
+
     await AuditService.record({
       eventType: 'document_read',
       actorDid: requesterDID,
@@ -257,7 +378,7 @@ recordRouter.get('/queryRecord', async (req: Request, res: Response) => {
       resourceId: recordId ?? `query:patientDID=${patientDID ?? '*'}:recordType=${recordType ?? '*'}`,
       resourceType: recordType ?? 'record',
       action: 'readRecord',
-      metadata: { resultCount: results.length, deniedCount: denied.length, redactionsApplied },
+      metadata: { resultCount: results.length, deniedCount: denied.length, tamperedCount: tamperedRecordIds.length, redactionsApplied },
     });
 
     res.json(recordId ? results[0] : results);

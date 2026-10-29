@@ -41,13 +41,15 @@ app.listen(apiPort, async () => {
 
   // Doctor registers its own schema + credential definition for medical
   // documents/prescriptions — separate from government's identity credential.
+  // Attributes match the paper's Medical Document credential (Section 6.1);
+  // patient name/ID stay in the DWN record only, not in the credential.
   // Falls back to a dummy credDef id on failure so routes still mount.
   let credentialDefinitionId = 'dummy-credential-definition-id-for-doctor';
   try {
     const schemaResult = await agent.createSchema(agentDid, {
       name: 'medical_document_credential',
       version: `1.0.${Math.floor(Math.random() * 100)}`,
-      attrNames: ['documentId', 'documentType', 'documentHash', 'patientName', 'patientId', 'diagnosis', 'prescription', 'issuedBy', 'issuedAt'],
+      attrNames: ['documentId', 'documentType', 'documentHash', 'diagnosis', 'prescription', 'issuerDid', 'issuedAt'],
       issuerId: agentDid,
     });
     if (schemaResult.schemaState.state !== 'finished') {

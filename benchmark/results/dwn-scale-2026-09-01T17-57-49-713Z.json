@@ -1,0 +1,604 @@
+{
+  "levels": [
+    {
+      "level": 50,
+      "avgMs": 2271.4,
+      "p95Ms": 2392,
+      "throughputReqPerSec": 63.1,
+      "errorRatePct": 0,
+      "runs": [
+        {
+          "avgMs": 3050.8,
+          "p95Ms": 3081.1,
+          "throughputReqPerSec": 48.6,
+          "errorRatePct": 0,
+          "failures": 0
+        },
+        {
+          "avgMs": 2305.2,
+          "p95Ms": 2392.8,
+          "throughputReqPerSec": 62.1,
+          "errorRatePct": 0,
+          "failures": 0
+        },
+        {
+          "avgMs": 2092.5,
+          "p95Ms": 2254.3,
+          "throughputReqPerSec": 66.5,
+          "errorRatePct": 0,
+          "failures": 0
+        },
+        {
+          "avgMs": 2894.7,
+          "p95Ms": 3128.6,
+          "throughputReqPerSec": 47.9,
+          "errorRatePct": 0,
+          "failures": 0
+        },
+        {
+          "avgMs": 2448.6,
+          "p95Ms": 2546,
+          "throughputReqPerSec": 58.7,
+          "errorRatePct": 0,
+          "failures": 0
+        },
+        {
+          "avgMs": 2188.2,
+          "p95Ms": 2327.9,
+          "throughputReqPerSec": 64.4,
+          "errorRatePct": 0,
+          "failures": 0
+        },
+        {
+          "avgMs": 2143.9,
+          "p95Ms": 2253.5,
+          "throughputReqPerSec": 66.2,
+          "errorRatePct": 0,
+          "failures": 0
+        },
+        {
+          "avgMs": 2044.8,
+          "p95Ms": 2169.3,
+          "throughputReqPerSec": 69,
+          "errorRatePct": 0,
+          "failures": 0
+        },
+        {
+          "avgMs": 2186.8,
+          "p95Ms": 2355.3,
+          "throughputReqPerSec": 63.5,
+          "errorRatePct": 0,
+          "failures": 0
+        },
+        {
+          "avgMs": 2202.4,
+          "p95Ms": 2291.9,
+          "throughputReqPerSec": 64.9,
+          "errorRatePct": 0,
+          "failures": 0
+        },
+        {
+          "avgMs": 2215.7,
+          "p95Ms": 2354.8,
+          "throughputReqPerSec": 62.9,
+          "errorRatePct": 0,
+          "failures": 0
+        },
+        {
+          "avgMs": 2116.8,
+          "p95Ms": 2207,
+          "throughputReqPerSec": 67.9,
+          "errorRatePct": 0,
+          "failures": 0
+        },
+        {
+          "avgMs": 2397.4,
+          "p95Ms": 2530.6,
+          "throughputReqPerSec": 59.2,
+          "errorRatePct": 0,
+          "failures": 0
+        },
+        {
+          "avgMs": 2026.6,
+          "p95Ms": 2200,
+          "throughputReqPerSec": 68,
+          "errorRatePct": 0,
+          "failures": 0
+        },
+        {
+          "avgMs": 2105.1,
+          "p95Ms": 2223.3,
+          "throughputReqPerSec": 67.3,
+          "errorRatePct": 0,
+          "failures": 0
+        },
+        {
+          "avgMs": 2368.9,
+          "p95Ms": 2478.2,
+          "throughputReqPerSec": 60.4,
+          "errorRatePct": 0,
+          "failures": 0
+        },
+        {
+          "avgMs": 2178.9,
+          "p95Ms": 2249.3,
+          "throughputReqPerSec": 66.6,
+          "errorRatePct": 0,
+          "failures": 0
+        },
+        {
+          "avgMs": 2251.8,
+          "p95Ms": 2358.1,
+          "throughputReqPerSec": 63.3,
+          "errorRatePct": 0,
+          "failures": 0
+        },
+        {
+          "avgMs": 2091.6,
+          "p95Ms": 2207.4,
+          "throughputReqPerSec": 67.8,
+          "errorRatePct": 0,
+          "failures": 0
+        },
+        {
+          "avgMs": 2116.3,
+          "p95Ms": 2230.1,
+          "throughputReqPerSec": 67.2,
+          "errorRatePct": 0,
+          "failures": 0
+        }
+      ]
+    },
+    {
+      "level": 100,
+      "avgMs": 5845.5,
+      "p95Ms": 5950.8,
+      "throughputReqPerSec": 50.9,
+      "errorRatePct": 0,
+      "runs": [
+        {
+          "avgMs": 6574.8,
+          "p95Ms": 7174,
+          "throughputReqPerSec": 41.8,
+          "errorRatePct": 0,
+          "failures": 0
+        },
+        {
+          "avgMs": 6555.2,
+          "p95Ms": 6649.6,
+          "throughputReqPerSec": 44.9,
+          "errorRatePct": 0,
+          "failures": 0
+        },
+        {
+          "avgMs": 7375.5,
+          "p95Ms": 7564.8,
+          "throughputReqPerSec": 39.6,
+          "errorRatePct": 0,
+          "failures": 0
+        },
+        {
+          "avgMs": 4929.8,
+          "p95Ms": 5046.3,
+          "throughputReqPerSec": 59.2,
+          "errorRatePct": 0,
+          "failures": 0
+        },
+        {
+          "avgMs": 5195.6,
+          "p95Ms": 5259.7,
+          "throughputReqPerSec": 56.5,
+          "errorRatePct": 0,
+          "failures": 0
+        },
+        {
+          "avgMs": 5130.2,
+          "p95Ms": 5189.3,
+          "throughputReqPerSec": 57.8,
+          "errorRatePct": 0,
+          "failures": 0
+        },
+        {
+          "avgMs": 5089.5,
+          "p95Ms": 5164.6,
+          "throughputReqPerSec": 57.8,
+          "errorRatePct": 0,
+          "failures": 0
+        },
+        {
+          "avgMs": 5288.7,
+          "p95Ms": 5353,
+          "throughputReqPerSec": 55.7,
+          "errorRatePct": 0,
+          "failures": 0
+        },
+        {
+          "avgMs": 5568,
+          "p95Ms": 5613,
+          "throughputReqPerSec": 53.4,
+          "errorRatePct": 0,
+          "failures": 0
+        },
+        {
+          "avgMs": 5631.4,
+          "p95Ms": 5687.7,
+          "throughputReqPerSec": 52.6,
+          "errorRatePct": 0,
+          "failures": 0
+        },
+        {
+          "avgMs": 5948.8,
+          "p95Ms": 5982.7,
+          "throughputReqPerSec": 50.1,
+          "errorRatePct": 0,
+          "failures": 0
+        },
+        {
+          "avgMs": 5508.7,
+          "p95Ms": 5608.2,
+          "throughputReqPerSec": 53.4,
+          "errorRatePct": 0,
+          "failures": 0
+        },
+        {
+          "avgMs": 5482.2,
+          "p95Ms": 5575.1,
+          "throughputReqPerSec": 53.5,
+          "errorRatePct": 0,
+          "failures": 0
+        },
+        {
+          "avgMs": 6010,
+          "p95Ms": 6084.6,
+          "throughputReqPerSec": 49.2,
+          "errorRatePct": 0,
+          "failures": 0
+        },
+        {
+          "avgMs": 5614.4,
+          "p95Ms": 5676.1,
+          "throughputReqPerSec": 52.8,
+          "errorRatePct": 0,
+          "failures": 0
+        },
+        {
+          "avgMs": 5928.6,
+          "p95Ms": 5982.4,
+          "throughputReqPerSec": 50.1,
+          "errorRatePct": 0,
+          "failures": 0
+        },
+        {
+          "avgMs": 5828.7,
+          "p95Ms": 5976.6,
+          "throughputReqPerSec": 50.2,
+          "errorRatePct": 0,
+          "failures": 0
+        },
+        {
+          "avgMs": 5765.6,
+          "p95Ms": 5828.7,
+          "throughputReqPerSec": 50.7,
+          "errorRatePct": 0,
+          "failures": 0
+        },
+        {
+          "avgMs": 7079.5,
+          "p95Ms": 7141.8,
+          "throughputReqPerSec": 42,
+          "errorRatePct": 0,
+          "failures": 0
+        },
+        {
+          "avgMs": 6404.9,
+          "p95Ms": 6457.2,
+          "throughputReqPerSec": 46.1,
+          "errorRatePct": 0,
+          "failures": 0
+        }
+      ]
+    },
+    {
+      "level": 150,
+      "avgMs": 12319.1,
+      "p95Ms": 12559,
+      "throughputReqPerSec": 34.2,
+      "errorRatePct": 5,
+      "runs": [
+        {
+          "avgMs": 0,
+          "p95Ms": 0,
+          "throughputReqPerSec": 0,
+          "errorRatePct": 100,
+          "failures": 150
+        },
+        {
+          "avgMs": 8517.6,
+          "p95Ms": 10495,
+          "throughputReqPerSec": 42.8,
+          "errorRatePct": 0,
+          "failures": 0
+        },
+        {
+          "avgMs": 10567.1,
+          "p95Ms": 10659.3,
+          "throughputReqPerSec": 42.2,
+          "errorRatePct": 0,
+          "failures": 0
+        },
+        {
+          "avgMs": 12055.8,
+          "p95Ms": 12137,
+          "throughputReqPerSec": 36.9,
+          "errorRatePct": 0,
+          "failures": 0
+        },
+        {
+          "avgMs": 9997.9,
+          "p95Ms": 10075.1,
+          "throughputReqPerSec": 44.6,
+          "errorRatePct": 0,
+          "failures": 0
+        },
+        {
+          "avgMs": 10592.8,
+          "p95Ms": 10738.5,
+          "throughputReqPerSec": 41.9,
+          "errorRatePct": 0,
+          "failures": 0
+        },
+        {
+          "avgMs": 10755.1,
+          "p95Ms": 10949.1,
+          "throughputReqPerSec": 41,
+          "errorRatePct": 0,
+          "failures": 0
+        },
+        {
+          "avgMs": 10474.8,
+          "p95Ms": 10820.6,
+          "throughputReqPerSec": 41.5,
+          "errorRatePct": 0,
+          "failures": 0
+        },
+        {
+          "avgMs": 11162.4,
+          "p95Ms": 11286.9,
+          "throughputReqPerSec": 39.8,
+          "errorRatePct": 0,
+          "failures": 0
+        },
+        {
+          "avgMs": 12285.2,
+          "p95Ms": 12398.7,
+          "throughputReqPerSec": 36.3,
+          "errorRatePct": 0,
+          "failures": 0
+        },
+        {
+          "avgMs": 11390.5,
+          "p95Ms": 11471.2,
+          "throughputReqPerSec": 39.1,
+          "errorRatePct": 0,
+          "failures": 0
+        },
+        {
+          "avgMs": 12074.8,
+          "p95Ms": 12201,
+          "throughputReqPerSec": 36.9,
+          "errorRatePct": 0,
+          "failures": 0
+        },
+        {
+          "avgMs": 14483.8,
+          "p95Ms": 14549.5,
+          "throughputReqPerSec": 30.9,
+          "errorRatePct": 0,
+          "failures": 0
+        },
+        {
+          "avgMs": 12060.2,
+          "p95Ms": 12200.8,
+          "throughputReqPerSec": 36.9,
+          "errorRatePct": 0,
+          "failures": 0
+        },
+        {
+          "avgMs": 12082.9,
+          "p95Ms": 12183.5,
+          "throughputReqPerSec": 36.9,
+          "errorRatePct": 0,
+          "failures": 0
+        },
+        {
+          "avgMs": 11112.5,
+          "p95Ms": 11197,
+          "throughputReqPerSec": 39.9,
+          "errorRatePct": 0,
+          "failures": 0
+        },
+        {
+          "avgMs": 14320.6,
+          "p95Ms": 14920.1,
+          "throughputReqPerSec": 30.1,
+          "errorRatePct": 0,
+          "failures": 0
+        },
+        {
+          "avgMs": 25785.7,
+          "p95Ms": 25879.7,
+          "throughputReqPerSec": 17.4,
+          "errorRatePct": 0,
+          "failures": 0
+        },
+        {
+          "avgMs": 19831.6,
+          "p95Ms": 20095.3,
+          "throughputReqPerSec": 22.4,
+          "errorRatePct": 0,
+          "failures": 0
+        },
+        {
+          "avgMs": 16830,
+          "p95Ms": 16921.8,
+          "throughputReqPerSec": 26.6,
+          "errorRatePct": 0,
+          "failures": 0
+        }
+      ]
+    },
+    {
+      "level": 200,
+      "avgMs": 132983.4,
+      "p95Ms": 135014.2,
+      "throughputReqPerSec": 5.5,
+      "errorRatePct": 6.17,
+      "runs": [
+        {
+          "avgMs": 50036.1,
+          "p95Ms": 50489.5,
+          "throughputReqPerSec": 11.9,
+          "errorRatePct": 0,
+          "failures": 0
+        },
+        {
+          "avgMs": 49216.3,
+          "p95Ms": 49738.2,
+          "throughputReqPerSec": 12.1,
+          "errorRatePct": 0,
+          "failures": 0
+        },
+        {
+          "avgMs": 54799.6,
+          "p95Ms": 57273.3,
+          "throughputReqPerSec": 10.5,
+          "errorRatePct": 0,
+          "failures": 0
+        },
+        {
+          "avgMs": 134858.6,
+          "p95Ms": 136597.1,
+          "throughputReqPerSec": 3.6,
+          "errorRatePct": 18,
+          "failures": 36
+        },
+        {
+          "avgMs": 63244.9,
+          "p95Ms": 63692.9,
+          "throughputReqPerSec": 9.4,
+          "errorRatePct": 0,
+          "failures": 0
+        },
+        {
+          "avgMs": 109906.4,
+          "p95Ms": 110846.9,
+          "throughputReqPerSec": 5.4,
+          "errorRatePct": 0,
+          "failures": 0
+        },
+        {
+          "avgMs": 108765,
+          "p95Ms": 109396.2,
+          "throughputReqPerSec": 5,
+          "errorRatePct": 8.5,
+          "failures": 17
+        },
+        {
+          "avgMs": 124296.6,
+          "p95Ms": 124942.7,
+          "throughputReqPerSec": 4,
+          "errorRatePct": 16,
+          "failures": 32
+        },
+        {
+          "avgMs": 105603.2,
+          "p95Ms": 115823.9,
+          "throughputReqPerSec": 5.2,
+          "errorRatePct": 0,
+          "failures": 0
+        },
+        {
+          "avgMs": 89899.6,
+          "p95Ms": 96323.8,
+          "throughputReqPerSec": 6.2,
+          "errorRatePct": 0,
+          "failures": 0
+        },
+        {
+          "avgMs": 153507.3,
+          "p95Ms": 153782.3,
+          "throughputReqPerSec": 3.3,
+          "errorRatePct": 15.5,
+          "failures": 31
+        },
+        {
+          "avgMs": 189700.1,
+          "p95Ms": 190277.9,
+          "throughputReqPerSec": 2.7,
+          "errorRatePct": 13.5,
+          "failures": 27
+        },
+        {
+          "avgMs": 252961.7,
+          "p95Ms": 254875.6,
+          "throughputReqPerSec": 2.3,
+          "errorRatePct": 2.5,
+          "failures": 5
+        },
+        {
+          "avgMs": 71641.6,
+          "p95Ms": 77388.2,
+          "throughputReqPerSec": 7.7,
+          "errorRatePct": 0,
+          "failures": 0
+        },
+        {
+          "avgMs": 88270.9,
+          "p95Ms": 88453.4,
+          "throughputReqPerSec": 6.4,
+          "errorRatePct": 6,
+          "failures": 12
+        },
+        {
+          "avgMs": 178068.8,
+          "p95Ms": 178656.8,
+          "throughputReqPerSec": 2.6,
+          "errorRatePct": 21.5,
+          "failures": 43
+        },
+        {
+          "avgMs": 126948.1,
+          "p95Ms": 130995.3,
+          "throughputReqPerSec": 4.6,
+          "errorRatePct": 0,
+          "failures": 0
+        },
+        {
+          "avgMs": 168470.7,
+          "p95Ms": 168838.6,
+          "throughputReqPerSec": 3.5,
+          "errorRatePct": 0.5,
+          "failures": 1
+        },
+        {
+          "avgMs": 246541.1,
+          "p95Ms": 246741.2,
+          "throughputReqPerSec": 2,
+          "errorRatePct": 16.5,
+          "failures": 33
+        },
+        {
+          "avgMs": 292931.7,
+          "p95Ms": 295150.4,
+          "throughputReqPerSec": 1.9,
+          "errorRatePct": 5,
+          "failures": 10
+        }
+      ]
+    }
+  ],
+  "repeatsPerLevel": 20,
+  "workloadPerUser": "storeRecord (write) + self-read queryRecord + shareRecord (grant one field to a second synthetic DID)",
+  "note": "No ledger, no AnonCreds/Askar native bindings touched — pure DWN HTTP + LevelDB + SQLite audit log. Each simulated user is a distinct patientDID, so per-patientDID rate limits are never triggered regardless of level.",
+  "generatedAt": "2026-09-01T17:57:49.717Z"
+}

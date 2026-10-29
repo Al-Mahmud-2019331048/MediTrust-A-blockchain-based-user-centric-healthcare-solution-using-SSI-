@@ -172,7 +172,13 @@ export class DWNProviderBackupDestination implements BackupDestination {
 // being unable to offer this).
 export async function deleteAllProviderBackups(patientDID: string): Promise<void> {
   const { privateKeyPem } = await getOrCreateSigningKey(patientDID);
-  const token = signWithPatientKey({ patientDID, action: 'delete-all', timestamp: new Date().toISOString() }, privateKeyPem);
+  // nonce makes this token single-use server-side (see backup-provider's
+  // nonce-guard.ts/provider-service.ts) — without it, a captured token stays
+  // valid to replay for its full 10-year JWT lifetime. Found 2026-08-12.
+  const token = signWithPatientKey(
+    { patientDID, action: 'delete-all', timestamp: new Date().toISOString(), nonce: crypto.randomUUID() },
+    privateKeyPem
+  );
 
   const response = await fetch(`${baseUrl()}/backup/patients/${encodeURIComponent(patientDID)}`, {
     method: 'DELETE',

@@ -1,0 +1,128 @@
+{
+  "results": [
+    {
+      "level": 1,
+      "avgMs": 28192.9,
+      "p95Ms": 28192.9,
+      "throughputReqPerSec": 0.035,
+      "errorRatePct": 0,
+      "failures": 0
+    },
+    {
+      "level": 2,
+      "avgMs": 17574.6,
+      "p95Ms": 18071.3,
+      "throughputReqPerSec": 0.111,
+      "errorRatePct": 0,
+      "failures": 0
+    },
+    {
+      "level": 3,
+      "avgMs": 7596,
+      "p95Ms": 9609.5,
+      "throughputReqPerSec": 0.312,
+      "errorRatePct": 0,
+      "failures": 0
+    },
+    {
+      "level": 4,
+      "avgMs": 8089.9,
+      "p95Ms": 11108.8,
+      "throughputReqPerSec": 0.36,
+      "errorRatePct": 0,
+      "failures": 0
+    },
+    {
+      "level": 5,
+      "avgMs": 9707.4,
+      "p95Ms": 13142.9,
+      "throughputReqPerSec": 0.38,
+      "errorRatePct": 0,
+      "failures": 0
+    },
+    {
+      "level": 6,
+      "avgMs": 11985.5,
+      "p95Ms": 17235.8,
+      "throughputReqPerSec": 0.348,
+      "errorRatePct": 0,
+      "failures": 0
+    },
+    {
+      "level": 7,
+      "avgMs": 12963.3,
+      "p95Ms": 19081.4,
+      "throughputReqPerSec": 0.367,
+      "errorRatePct": 0,
+      "failures": 0
+    },
+    {
+      "level": 8,
+      "avgMs": 14298,
+      "p95Ms": 19769.1,
+      "throughputReqPerSec": 0.405,
+      "errorRatePct": 0,
+      "failures": 0
+    },
+    {
+      "level": 9,
+      "avgMs": 14516,
+      "p95Ms": 22754.6,
+      "throughputReqPerSec": 0.396,
+      "errorRatePct": 0,
+      "failures": 0
+    },
+    {
+      "level": 10,
+      "avgMs": 15623,
+      "p95Ms": 23748.9,
+      "throughputReqPerSec": 0.421,
+      "errorRatePct": 0,
+      "failures": 0
+    },
+    {
+      "level": 11,
+      "avgMs": 14823.2,
+      "p95Ms": 23342.6,
+      "throughputReqPerSec": 0.471,
+      "errorRatePct": 0,
+      "failures": 0
+    },
+    {
+      "level": 12,
+      "avgMs": 17210.6,
+      "p95Ms": 26865.8,
+      "throughputReqPerSec": 0.447,
+      "errorRatePct": 0,
+      "failures": 0
+    },
+    {
+      "level": 13,
+      "avgMs": 18162.9,
+      "p95Ms": 38459.5,
+      "throughputReqPerSec": 0.338,
+      "errorRatePct": 0,
+      "failures": 0
+    },
+    {
+      "level": 14,
+      "avgMs": 24094.7,
+      "p95Ms": 35825.2,
+      "throughputReqPerSec": 0.391,
+      "errorRatePct": 0,
+      "failures": 0
+    },
+    {
+      "level": 15,
+      "avgMs": 20354.1,
+      "p95Ms": 34549.8,
+      "throughputReqPerSec": 0.434,
+      "errorRatePct": 0,
+      "failures": 0
+    }
+  ],
+  "connectionsSetUp": 15,
+  "stoppedReason": "reached the top of what was set up",
+  "note": "Levels start at 1 and increment by 1 — no target level was assumed going in. The last row is the real, measured ceiling of this run, not a designed test size.",
+  "generatedAt": "2026-09-01T12:14:19.364Z"
+}

@@ -28,6 +28,8 @@ function toMessage(event: AuditEvent): string {
       return `Your data was restored from backup (${metadata.recordsRestored ?? 0} records, ${metadata.permissionsRestored ?? 0} permissions).`;
     case 'backup_integrity_check_failed':
       return 'A backup entry failed integrity verification — possible tampering detected.';
+    case 'document_integrity_check_failed':
+      return `One of your ${event.resourceType} records failed its integrity check on read — possible tampering or corruption detected.`;
     default:
       return `${event.eventType.replace(/_/g, ' ')} event recorded.`;
   }

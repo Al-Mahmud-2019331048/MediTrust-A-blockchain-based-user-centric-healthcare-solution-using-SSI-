@@ -204,6 +204,7 @@ async function main() {
         recordType: 'medical',
         purpose: 'insurance',
         allowedFields: ['documentType', 'issuedBy'],
+        nonce: `e2e-share-${randomHex(8)}`,
       }),
     });
     const permission = await shareRes.json();
@@ -327,12 +328,35 @@ async function main() {
     });
   }
 
-  // ---------- Step 10: Integrity VC verification ----------
-  steps.push({
-    step: '10. Integrity VC verification',
-    status: 'na',
-    detail: 'Not applicable — DWNRecord.integrityVCId is a documented, deferred placeholder (local-placeholder-{uuid}), not yet a real on-chain Indy VC. See CLAUDE.md Known Constraints.',
-  });
+  // ---------- Step 10: Integrity VC (on-chain anchor) verification ----------
+  // storeRecord's on-chain anchor (record-routes.ts) is fire-and-forget and
+  // resolves well after the write's own HTTP response — polls the record
+  // back rather than assuming any fixed delay is enough, same pattern as
+  // step 2/3's credential-readiness polls above.
+  if (!dwnRecordId || !patientDID) {
+    steps.push({
+      step: '10. Integrity VC verification',
+      status: 'blocked',
+      detail: 'No dwnRecordId/patientDID from step 3 to check — medical document issuance did not complete.',
+    });
+  } else {
+    const anchoredRecord = await pollUntil(async () => {
+      const res = await fetch(`${DWN_URL}/dwn/queryRecord?recordId=${dwnRecordId}&requesterDID=${patientDID}`);
+      if (!res.ok) return undefined;
+      const record = await res.json();
+      return typeof record.integrityVCId === 'string' && record.integrityVCId.startsWith('indy-anchor-txn-')
+        ? record
+        : undefined;
+    }, 10000, 500);
+
+    steps.push({
+      step: '10. Integrity VC verification',
+      status: anchoredRecord ? 'ok' : 'degraded',
+      detail: anchoredRecord
+        ? `Real on-chain anchor confirmed: integrityVCId=${anchoredRecord.integrityVCId}, docHash=${anchoredRecord.hash}`
+        : 'No real anchor landed within 10s — integrityVCId is still its local placeholder. Anchoring is deliberately fire-and-forget/best-effort (see audit/src/services/anchor-client.ts) and subject to the same documented ledger flakiness as other anchored flows, so this is not necessarily a regression — re-run to confirm before treating it as one.',
+    });
+  }
 
   await shutdownAllTestPatients();
 

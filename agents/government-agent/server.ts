@@ -40,15 +40,17 @@ app.listen(apiPort, async () => {
   await agent.importDid(agentDid, agentSeed);
 
   // Government registers its own schema + credential definition for the
-  // identity credential it issues. Falls back to a dummy credDef id on
-  // failure (e.g. no real DID/seed configured yet) so routes still mount and
-  // the server stays up — matches the legacy reference's resilience pattern.
+  // CORE identity credential it issues (name/age/email/nationalId/
+  // patientAccountId only — no clinical data). Falls back to a dummy credDef
+  // id on failure (e.g. no real DID/seed configured yet) so routes still
+  // mount and the server stays up — matches the legacy reference's
+  // resilience pattern.
   let credentialDefinitionId = 'dummy-credential-definition-id-for-government';
   try {
     const schemaResult = await agent.createSchema(agentDid, {
       name: 'patient_credential',
       version: `1.0.${Math.floor(Math.random() * 100)}`,
-      attrNames: ['name', 'age', 'email', 'nationalId', 'medicalCondition', 'bloodType', 'emergencyContact', 'patientAccountId'],
+      attrNames: ['name', 'age', 'email', 'nationalId', 'patientAccountId'],
       issuerId: agentDid,
     });
     if (schemaResult.schemaState.state !== 'finished') {
@@ -66,6 +68,43 @@ app.listen(apiPort, async () => {
     console.log(`Government schema + credential definition registered: ${credentialDefinitionId}`);
   } catch (error) {
     console.warn(`Government schema/credDef registration failed, routes will mount with a dummy id: ${(error as Error).message}`);
+  }
+
+  // A SECOND, independent schema + credential definition for the patient's
+  // EXTENDED PROFILE (medicalCondition/bloodType/emergencyContact) — split
+  // out of the core identity credential above so data minimization is
+  // structural: a verifier restricted to the core credDef literally cannot
+  // be handed clinical fields, rather than relying on every proof request
+  // remembering to ask for a subset (the class of bug the 2026-08-09 audit
+  // found and fixed once already, at the proof-request layer — see
+  // common-routes.ts's --doctor branch). Attribute set matches the paper's
+  // data model (Section 6.1) exactly. Nothing requests this credential today
+  // (doctor/pharmacist identity checks only ever asked for core fields) —
+  // registered now so the split is real at the schema level, ready for a
+  // verifier that legitimately needs it later.
+  let extendedProfileCredDefId = 'dummy-credential-definition-id-for-extended-profile';
+  try {
+    const extendedSchemaResult = await agent.createSchema(agentDid, {
+      name: 'patient_extended_profile_credential',
+      version: `1.0.${Math.floor(Math.random() * 100)}`,
+      attrNames: ['medicalCondition', 'bloodType', 'emergencyContact'],
+      issuerId: agentDid,
+    });
+    if (extendedSchemaResult.schemaState.state !== 'finished') {
+      throw new Error(`Schema registration did not finish: ${JSON.stringify(extendedSchemaResult.schemaState)}`);
+    }
+    const extendedCredDefResult = await agent.createCredentialDefinition(
+      agentDid,
+      extendedSchemaResult.schemaState.schemaId,
+      'patient_extended_profile_credential'
+    );
+    if (extendedCredDefResult.credentialDefinitionState.state !== 'finished') {
+      throw new Error(`Cred def registration did not finish: ${JSON.stringify(extendedCredDefResult.credentialDefinitionState)}`);
+    }
+    extendedProfileCredDefId = extendedCredDefResult.credentialDefinitionState.credentialDefinitionId;
+    console.log(`Government extended-profile schema + credential definition registered: ${extendedProfileCredDefId}`);
+  } catch (error) {
+    console.warn(`Government extended-profile schema/credDef registration failed, extended credentials won't be issued this boot: ${(error as Error).message}`);
   }
 
   // Government also registers a SECOND, independent schema + credential
@@ -112,7 +151,7 @@ app.listen(apiPort, async () => {
     credentialDefinitionId,
   };
 
-  registerGovernmentRoutes(app, agent, agentDid, () => credentialDefinitionId);
+  registerGovernmentRoutes(app, agent, agentDid, () => credentialDefinitionId, () => extendedProfileCredDefId);
   registerHospitalAuthorizationRoute(app, agent, agentDid, () => hospitalAuthorizationCredDefId);
   registerAnchorRoutes(app, agent, agentDid);
   registerCommonRoutes(app, agent, commonConfig, proofCache);

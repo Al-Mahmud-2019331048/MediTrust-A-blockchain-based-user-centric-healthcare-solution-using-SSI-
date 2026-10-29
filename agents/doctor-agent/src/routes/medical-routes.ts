@@ -3,6 +3,8 @@ import { BaseAgent } from "../../../shared/agent-base";
 import { storeRecord, queryRecords, DWNRequestError } from "../../../shared/dwn-client";
 import { DWNRecord } from "../../../shared/types";
 import { extractRevealedAttributes } from "../../../shared/proof-parser";
+import { AuditService } from "../../../../audit/src/services/audit-service";
+import { buildDocumentReferenceResource, buildMedicationRequestResource } from "../../../shared/fhir/fhir-mapper";
 
 const BINARY_ATTACHMENT_CONTENT_TYPES: DWNRecord["contentType"][] = [
   "application/pdf",
@@ -129,6 +131,19 @@ async function verifyIdentityProof(
   }
 }
 
+// Builds the AnonCreds attribute list for a medical_document_credential from
+// the fuller DWN document data. Must list exactly the schema's attrNames
+// (doctor-agent/server.ts) — Credo-TS rejects an offer with any extra or
+// missing attribute.
+function buildMedicalCredentialAttributes(
+  documentData: { documentId: string; documentType: string; documentHash: string; diagnosis: string; prescription: string; issuedAt: string },
+  issuerDid: string
+): { name: string; value: string }[] {
+  const { documentId, documentType, documentHash, diagnosis, prescription, issuedAt } = documentData;
+  return Object.entries({ documentId, documentType, documentHash, diagnosis, prescription, issuerDid, issuedAt })
+    .map(([name, value]) => ({ name, value: String(value) }));
+}
+
 // Registers all doctor agent routes
 export function registerDoctorRoutes(
   app: Express,
@@ -174,6 +189,11 @@ export function registerDoctorRoutes(
       identityVerified,
     };
 
+    // FHIR-shaped representation of the same data, stored only in the DWN
+    // record (never sent as an AnonCreds attribute or in the DIDComm
+    // credential message below) — see fhir-mapper.ts for scope/limits.
+    const dwnDocumentData = { ...documentData, fhir: buildDocumentReferenceResource(documentData) };
+
     const credDefId = getCredDefId();
     if (!credDefId || credDefId.startsWith("dummy-")) {
       const msg = JSON.stringify({
@@ -187,13 +207,22 @@ export function registerDoctorRoutes(
       }, null, 2);
       try {
         const result = await agent.sendMessage(connectionId, msg);
+        await AuditService.record({
+          eventType: "credential_issued",
+          actorDid: agentDid,
+          targetDid: effectivePatientDID || connectionId,
+          resourceId: result.id,
+          resourceType: "medical_document_credential",
+          action: "issueAnonCredsCredential",
+          metadata: { connectionId, documentId, documentType, identityVerified, isW3C: true },
+        });
         const { record, attachmentRecord, dwnWriteError } = await writeIssuedDocumentToDWN(
           agent,
           connectionId,
           agentDid,
           "medical",
           "MedicalRecord",
-          documentData,
+          dwnDocumentData,
           attachment,
           effectivePatientDID
         );
@@ -211,20 +240,28 @@ export function registerDoctorRoutes(
     }
 
     try {
-      // identityVerified is DWN-record-only metadata, not part of the
-      // registered medical_document_credential schema's attrNames — sending
-      // it as an AnonCreds attribute makes Credo-TS reject the whole offer
-      // with a schema-mismatch error, so it's excluded here specifically.
-      const { identityVerified: _identityVerified, ...credentialAttributes } = documentData;
-      const attributes = Object.entries(credentialAttributes).map(([name, value]) => ({ name, value: String(value) }));
+      // The credential carries exactly the medical_document_credential
+      // schema's attrNames (the paper's Medical Document, Section 6.1).
+      // identityVerified, patientName, patientId and issuedBy stay in the
+      // DWN record only; issuerDid is this agent's own DID, set server-side.
+      const attributes = buildMedicalCredentialAttributes(documentData, agentDid);
       const result = await agent.issueAnonCredsCredential(connectionId, credDefId, attributes);
+      await AuditService.record({
+        eventType: "credential_issued",
+        actorDid: agentDid,
+        targetDid: effectivePatientDID || connectionId,
+        resourceId: result.id,
+        resourceType: "medical_document_credential",
+        action: "issueAnonCredsCredential",
+        metadata: { connectionId, documentId, documentType, identityVerified, isW3C: false },
+      });
       const { record, attachmentRecord, dwnWriteError } = await writeIssuedDocumentToDWN(
         agent,
         connectionId,
         agentDid,
         "medical",
         "MedicalRecord",
-        documentData,
+        dwnDocumentData,
         attachment,
         effectivePatientDID
       );
@@ -270,6 +307,9 @@ export function registerDoctorRoutes(
         // Derived server-side — see verifyIdentityProof above.
         identityVerified,
       };
+      // FHIR-shaped representation, DWN-record-only — see comment on the
+      // matching line in /issue-medical-credential above.
+      const dwnDocumentData = { ...documentData, fhir: buildMedicationRequestResource(documentData) };
       const msg = JSON.stringify({
         "@type": "https://didcomm.org/issue-credential/2.0/credential",
         credential: {
@@ -281,13 +321,22 @@ export function registerDoctorRoutes(
       }, null, 2);
       try {
         const result = await agent.sendMessage(connectionId, msg);
+        await AuditService.record({
+          eventType: "credential_issued",
+          actorDid: agentDid,
+          targetDid: effectivePatientDID || connectionId,
+          resourceId: result.id,
+          resourceType: "prescription_credential",
+          action: "issueAnonCredsCredential",
+          metadata: { connectionId, documentId: documentData.documentId, identityVerified, isW3C: true },
+        });
         const { record, attachmentRecord, dwnWriteError } = await writeIssuedDocumentToDWN(
           agent,
           connectionId,
           agentDid,
           "prescription",
           "Prescription",
-          documentData,
+          dwnDocumentData,
           attachment,
           effectivePatientDID
         );
@@ -317,20 +366,30 @@ export function registerDoctorRoutes(
       // Derived server-side — see verifyIdentityProof above.
       identityVerified,
     };
+    // FHIR-shaped representation, DWN-record-only — see comment on the
+    // matching line in /issue-medical-credential above.
+    const dwnDocumentData = { ...documentData, fhir: buildMedicationRequestResource(documentData) };
 
     try {
-      // See the matching comment in /issue-medical-credential above:
-      // identityVerified is DWN-only metadata, not a schema attribute.
-      const { identityVerified: _identityVerified, ...credentialAttributes } = documentData;
-      const attributes = Object.entries(credentialAttributes).map(([name, value]) => ({ name, value: String(value) }));
+      // See the matching comment in /issue-medical-credential above.
+      const attributes = buildMedicalCredentialAttributes(documentData, agentDid);
       const result = await agent.issueAnonCredsCredential(connectionId, credDefId, attributes);
+      await AuditService.record({
+        eventType: "credential_issued",
+        actorDid: agentDid,
+        targetDid: effectivePatientDID || connectionId,
+        resourceId: result.id,
+        resourceType: "prescription_credential",
+        action: "issueAnonCredsCredential",
+        metadata: { connectionId, documentId: documentData.documentId, identityVerified, isW3C: false },
+      });
       const { record, attachmentRecord, dwnWriteError } = await writeIssuedDocumentToDWN(
         agent,
         connectionId,
         agentDid,
         "prescription",
         "Prescription",
-        documentData,
+        dwnDocumentData,
         attachment,
         effectivePatientDID
       );

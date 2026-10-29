@@ -1,0 +1,60 @@
+{
+  "steps": [
+    {
+      "step": "1. DID",
+      "status": "ok",
+      "detail": "Real, registered identities already exist: government=did:indy:bcovrin:test:734uMwddMmQ8WikLwkjw9E, doctor=did:indy:bcovrin:test:3zTsyNGwtXWjTP7DV4gxmR"
+    },
+    {
+      "step": "2. VC (identity issuance)",
+      "status": "ok",
+      "detail": "Real AnonCreds identity credential issued"
+    },
+    {
+      "step": "3. Doctor verifies + issues",
+      "status": "degraded",
+      "detail": "Fell back to W3C-style message (ledger connectivity unavailable), but DWN write still happened: dwnRecordId=1400d4b9-2356-46b9-b66c-7424efef6d2d, real verified patientDID=fc6c9924-5388-40d9-a587-a269707b3eba"
+    },
+    {
+      "step": "4. DWN write confirmation",
+      "status": "ok",
+      "detail": "Self-read confirms the record is genuinely in the DWN with matching data (recordId=1400d4b9-2356-46b9-b66c-7424efef6d2d)"
+    },
+    {
+      "step": "5. shareRecord",
+      "status": "ok",
+      "detail": "Granted did:e2e:insurer-8f2f0037 access to ['documentType','issuedBy'] only"
+    },
+    {
+      "step": "6. Selective read",
+      "status": "ok",
+      "detail": "Insurer sees only [documentType, issuedBy] as granted — diagnosis/prescription correctly redacted"
+    },
+    {
+      "step": "7a. Real proof exchange attempt",
+      "status": "ok",
+      "detail": "Real AnonCreds proof verified on the same connection established in step 3 (id=3f10b8b4-8ed0-402e-8758-622b1f5b6d60)"
+    },
+    {
+      "step": "7b. VP generation mechanism (synthetic proof)",
+      "status": "ok",
+      "detail": "VP generated and signed from a synthetic AnonCreds proof object (mechanism verified; not a live ZKP — see step 7a)"
+    },
+    {
+      "step": "8. revokeAccess",
+      "status": "ok",
+      "detail": "Read after revocation returned 403 (expected 403)"
+    },
+    {
+      "step": "9. Audit integrity (positive case)",
+      "status": "ok",
+      "detail": "8 audit events recorded for this run's patientDID, all verify()=true (Day 18's attack sim already proved the tampered/negative case)"
+    },
+    {
+      "step": "10. Integrity VC verification",
+      "status": "ok",
+      "detail": "Real on-chain anchor confirmed: integrityVCId=indy-anchor-txn-3243779, docHash=82e70a5ebe2bdb61024508272953f78fbc1aeee9b693407458001386578cf0f0"
+    }
+  ],
+  "generatedAt": "2026-08-12T08:11:37.462Z"
+}

@@ -1,0 +1,60 @@
+{
+  "steps": [
+    {
+      "step": "1. DID",
+      "status": "ok",
+      "detail": "Real, registered identities already exist: government=did:indy:bcovrin:test:734uMwddMmQ8WikLwkjw9E, doctor=did:indy:bcovrin:test:3zTsyNGwtXWjTP7DV4gxmR"
+    },
+    {
+      "step": "2. VC (identity issuance)",
+      "status": "ok",
+      "detail": "Real AnonCreds identity credential issued"
+    },
+    {
+      "step": "3. Doctor verifies + issues",
+      "status": "blocked",
+      "detail": "Identity proof did not verify or reveal patientAccountId (credentialReady=false) — cannot establish a real patientDID"
+    },
+    {
+      "step": "4. DWN write confirmation",
+      "status": "blocked",
+      "detail": "No record was written in step 3 to confirm"
+    },
+    {
+      "step": "5. shareRecord",
+      "status": "blocked",
+      "detail": "No patientDID established from step 3"
+    },
+    {
+      "step": "6. Selective read",
+      "status": "blocked",
+      "detail": "Prerequisite steps did not complete"
+    },
+    {
+      "step": "7a. Real proof exchange attempt",
+      "status": "ok",
+      "detail": "Real AnonCreds proof verified on the same connection established in step 3 (id=809b38bf-693c-48ca-bd40-3a175cb3cb67)"
+    },
+    {
+      "step": "7b. VP generation mechanism (synthetic proof)",
+      "status": "ok",
+      "detail": "VP generated and signed from a synthetic AnonCreds proof object (mechanism verified; not a live ZKP — see step 7a)"
+    },
+    {
+      "step": "8. revokeAccess",
+      "status": "blocked",
+      "detail": "Prerequisite steps did not complete"
+    },
+    {
+      "step": "9. Audit integrity",
+      "status": "blocked",
+      "detail": "No patientDID to check audit events for"
+    },
+    {
+      "step": "10. Integrity VC verification",
+      "status": "blocked",
+      "detail": "No dwnRecordId/patientDID from step 3 to check — medical document issuance did not complete."
+    }
+  ],
+  "generatedAt": "2026-08-12T09:09:29.659Z"
+}

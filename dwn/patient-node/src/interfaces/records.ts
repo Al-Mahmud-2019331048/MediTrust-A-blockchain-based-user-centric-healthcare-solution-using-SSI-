@@ -55,8 +55,12 @@ export class RecordsInterface {
 
     const recordId = generateId();
     const now = new Date().toISOString();
-    // TODO (Days 16-17): replace with a real Indy VC ID once the doctor agent
-    // can call back into the DWN with an on-chain integrity anchor.
+    // Placeholder until markRecordAnchored() (below) replaces it with a real
+    // ledger transaction reference — record-routes.ts fires a best-effort,
+    // fire-and-forget attemptAnchor(hash) call right after this record is
+    // created and stays a placeholder if that anchor attempt is blocked or
+    // never attempted (e.g. GOVERNMENT_AGENT_BASE_URL unset), same fail-soft
+    // behavior as every other on-chain anchoring call site in this codebase.
     const integrityVCId = `local-placeholder-${generateId()}`;
 
     const record: DWNRecord = {
@@ -80,6 +84,41 @@ export class RecordsInterface {
     await LevelDBAdapter.put(RECORD_KEY_PREFIX + recordId, JSON.stringify(record));
 
     return { record, encryptTimeMs, wrapTimeMs };
+  }
+
+  // Called by record-routes.ts once its fire-and-forget attemptAnchor(hash)
+  // resolves (well after the storeRecord response has already been sent —
+  // same "never block the caller on a ledger write" reasoning as every
+  // other anchoring call site, see anchor-client.ts). A 'blocked' or
+  // 'not_attempted' result deliberately leaves the existing
+  // local-placeholder-* integrityVCId in place rather than erroring —
+  // anchoring is a best-effort bonus on top of the AES-256/SHA-256
+  // protection that already exists, never a dependency for the write to be
+  // considered successful.
+  //
+  // Returns the updated record (or null if there was nothing to update) so
+  // the caller can re-push it to backup — found live 2026-08-31 during a
+  // device-loss recovery drill that a record's real on-chain anchor was
+  // silently lost on restore: backupWrite() only ever fires once, at
+  // storeRecord time, with the pre-anchor placeholder still in place. This
+  // method used to return void and only patch the live LevelDB copy, so
+  // that placeholder stayed permanently frozen in backup even after the
+  // anchor resolved — recovering the record afterward would always bring
+  // the placeholder back, never the real anchor, with no error or warning.
+  static async markRecordAnchored(
+    recordId: string,
+    anchor: { anchorStatus: 'anchored' | 'blocked' | 'not_attempted'; ledgerTxnSeqNo?: number }
+  ): Promise<DWNRecord | null> {
+    if (anchor.anchorStatus !== 'anchored' || anchor.ledgerTxnSeqNo === undefined) return null;
+    // The record may have been deleted or overwritten (e.g. a restore) in
+    // the time between the write and this resolving — nothing to update in
+    // that case, and silently skipping is correct for a best-effort bonus.
+    const record = await this.readRecord(recordId);
+    if (!record) return null;
+    record.integrityVCId = `indy-anchor-txn-${anchor.ledgerTxnSeqNo}`;
+    record.updatedAt = new Date().toISOString();
+    await LevelDBAdapter.put(RECORD_KEY_PREFIX + recordId, JSON.stringify(record));
+    return record;
   }
 
   static async readRecord(recordId: string): Promise<DWNRecord | null> {

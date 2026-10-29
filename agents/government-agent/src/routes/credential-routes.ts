@@ -1,15 +1,29 @@
 import { Express, Request, Response } from "express";
 import { BaseAgent } from "../../../shared/agent-base";
 import { generateId } from "../../../../crypto/encryption/src/hash-utils";
+import { AuditService } from "../../../../audit/src/services/audit-service";
 
 // Registers all government (issuer) agent routes
 export function registerGovernmentRoutes(
   app: Express,
   agent: BaseAgent,
   agentDid: string,
-  getCredDefId: () => string
+  getCredDefId: () => string,
+  getExtendedCredDefId: () => string
 ) {
-  // POST /issue-credential — issues identity credential to patient
+  // POST /issue-credential — issues identity credential(s) to patient.
+  //
+  // Split into two independent credentials (2026-08 data-minimization fix):
+  // a CORE identity credential (name/age/email/nationalId/patientAccountId)
+  // and an EXTENDED PROFILE credential (medicalCondition/bloodType/
+  // emergencyContact). Previously these 8 fields were one bundled
+  // credential, so any verifier restricted to "the identity credDef" could
+  // technically be handed clinical data too — only the proof REQUEST asking
+  // for a subset kept that from happening in practice (and that request
+  // once forgot to, see the 2026-08-09 audit). Splitting the credential
+  // itself makes the restriction structural: a verifier scoped to the core
+  // credDef cannot receive medicalCondition/bloodType/emergencyContact, full
+  // stop, regardless of what any given proof request asks for.
   app.post("/issue-credential", async (req: Request, res: Response) => {
     const { connectionId, name, email, age, nationalId, medicalCondition, bloodType, emergencyContact } = req.body;
 
@@ -26,30 +40,73 @@ export function registerGovernmentRoutes(
     // DID by hand. Deliberately a plain opaque UUID, not e.g. nationalId —
     // patientDID ends up as a plaintext LevelDB key prefix and backup
     // folder name in the DWN, so a real PII value shouldn't be reused here.
+    // Carried only by the core credential — the extended-profile schema
+    // matches the paper's data model (Section 6.1) and has no account ID.
     const patientAccountId = generateId();
 
-    const attributes = [
+    const coreAttributes = [
       { name: "name", value: `${name ?? "John Doe"}` },
       { name: "age", value: `${age ?? 30}` },
       { name: "email", value: `${email ?? "patient@example.com"}` },
       { name: "nationalId", value: `${nationalId ?? "123456789"}` },
+      { name: "patientAccountId", value: patientAccountId },
+    ];
+    const extendedAttributes = [
       { name: "medicalCondition", value: `${medicalCondition ?? "None"}` },
       { name: "bloodType", value: `${bloodType ?? "O+"}` },
       { name: "emergencyContact", value: `${emergencyContact ?? "555-123-4567"}` },
-      { name: "patientAccountId", value: patientAccountId },
     ];
 
+    // Best-effort: the extended-profile credential is a genuinely separate
+    // credential from core identity, not a required part of it succeeding.
+    // Its credDef being unregistered (e.g. this boot's second schema
+    // registration hit the ledger's per-DID write cooldown — see
+    // CLAUDE.md) must not fail the core identity issuance that every other
+    // part of this system depends on; it's simply skipped and logged.
+    async function issueExtendedProfile(): Promise<string | undefined> {
+      const extendedCredDefId = getExtendedCredDefId();
+      if (!extendedCredDefId || extendedCredDefId.startsWith("dummy-")) return undefined;
+      try {
+        const extendedResult = await agent.issueAnonCredsCredential(connectionId, extendedCredDefId, extendedAttributes);
+        await AuditService.record({
+          eventType: "credential_issued",
+          actorDid: agentDid,
+          targetDid: patientAccountId,
+          resourceId: extendedResult.id,
+          resourceType: "identity_extended_profile_credential",
+          action: "issueAnonCredsCredential",
+          metadata: { connectionId, isW3C: false },
+        });
+        return extendedResult.id;
+      } catch (_extendedError) {
+        return undefined;
+      }
+    }
+
     try {
-      const result = await agent.issueAnonCredsCredential(connectionId, credDefId, attributes);
+      const result = await agent.issueAnonCredsCredential(connectionId, credDefId, coreAttributes);
+      await AuditService.record({
+        eventType: "credential_issued",
+        actorDid: agentDid,
+        targetDid: patientAccountId,
+        resourceId: result.id,
+        resourceType: "identity_credential",
+        action: "issueAnonCredsCredential",
+        metadata: { connectionId, isW3C: false },
+      });
+      const extendedProfileCredentialId = await issueExtendedProfile();
       res.status(200).send({
         success: true,
         credentialId: result.id,
+        extendedProfileCredentialId,
         message: "Identity credential issuance initiated",
         state: result.state,
         patientAccountId,
       });
     } catch (error) {
-      // W3C fallback
+      // W3C fallback — same degraded, non-ZKP path as before, now split the
+      // same way as the real AnonCreds path. The extended-profile message is
+      // attempted best-effort and never blocks a successful core fallback.
       try {
         const w3cCredential = {
           type: ["VerifiableCredential", "IdentityCredential"],
@@ -57,11 +114,51 @@ export function registerGovernmentRoutes(
           issuanceDate: new Date().toISOString(),
           credentialSubject: {
             id: patientAccountId,
-            ...Object.fromEntries(attributes.map((a) => [a.name, a.value])),
+            ...Object.fromEntries(coreAttributes.map((a) => [a.name, a.value])),
           },
         };
         const w3cResult = await agent.sendMessage(connectionId, JSON.stringify(w3cCredential, null, 2));
-        return res.status(200).send({ success: true, credentialId: w3cResult.id, isW3C: true, patientAccountId });
+        await AuditService.record({
+          eventType: "credential_issued",
+          actorDid: agentDid,
+          targetDid: patientAccountId,
+          resourceId: w3cResult.id,
+          resourceType: "identity_credential",
+          action: "issueAnonCredsCredential",
+          metadata: { connectionId, isW3C: true },
+        });
+
+        let w3cExtendedId: string | undefined;
+        try {
+          const w3cExtendedCredential = {
+            type: ["VerifiableCredential", "IdentityExtendedProfileCredential"],
+            issuer: agentDid,
+            issuanceDate: new Date().toISOString(),
+            credentialSubject: {
+              id: patientAccountId,
+              ...Object.fromEntries(extendedAttributes.map((a) => [a.name, a.value])),
+            },
+          };
+          const w3cExtendedResult = await agent.sendMessage(connectionId, JSON.stringify(w3cExtendedCredential, null, 2));
+          w3cExtendedId = w3cExtendedResult.id;
+          await AuditService.record({
+            eventType: "credential_issued",
+            actorDid: agentDid,
+            targetDid: patientAccountId,
+            resourceId: w3cExtendedResult.id,
+            resourceType: "identity_extended_profile_credential",
+            action: "issueAnonCredsCredential",
+            metadata: { connectionId, isW3C: true },
+          });
+        } catch (_w3cExtendedError) {}
+
+        return res.status(200).send({
+          success: true,
+          credentialId: w3cResult.id,
+          extendedProfileCredentialId: w3cExtendedId,
+          isW3C: true,
+          patientAccountId,
+        });
       } catch (_w3cError) {}
       res.status(500).send({ error: error.message });
     }
@@ -99,6 +196,15 @@ export function registerGovernmentRoutes(
         { name: "issuedAt", value: issuedAt },
       ];
       const result = await agent.issueAnonCredsCredential(connectionId, govCredDefId, attributes);
+      await AuditService.record({
+        eventType: "credential_issued",
+        actorDid: agentDid,
+        targetDid: issuedBy,
+        resourceId: result.id,
+        resourceType: "medical_document_credential",
+        action: "issueAnonCredsCredential",
+        metadata: { connectionId, documentId, documentType },
+      });
       res.status(200).json({ success: true, credentialExchangeId: result.id, state: result.state });
     } catch (error) {
       res.status(500).json({ error: error.message });
@@ -190,6 +296,15 @@ export function registerHospitalAuthorizationRoute(
       };
       try {
         const w3cResult = await agent.sendMessage(connectionId, JSON.stringify(w3cCredential, null, 2));
+        await AuditService.record({
+          eventType: "credential_issued",
+          actorDid: agentDid,
+          targetDid: connectionId,
+          resourceId: w3cResult.id,
+          resourceType: "hospital_authorization_credential",
+          action: "issueAnonCredsCredential",
+          metadata: { connectionId, institutionName, isW3C: true },
+        });
         return res.status(200).send({ success: true, credentialId: w3cResult.id, isW3C: true });
       } catch (error) {
         return res.status(500).send({ error: error.message });
@@ -199,6 +314,15 @@ export function registerHospitalAuthorizationRoute(
     try {
       const attributes = Object.entries(attributesData).map(([name, value]) => ({ name, value: String(value) }));
       const result = await agent.issueAnonCredsCredential(connectionId, credDefId, attributes);
+      await AuditService.record({
+        eventType: "credential_issued",
+        actorDid: agentDid,
+        targetDid: connectionId,
+        resourceId: result.id,
+        resourceType: "hospital_authorization_credential",
+        action: "issueAnonCredsCredential",
+        metadata: { connectionId, institutionName, isW3C: false },
+      });
       res.status(200).send({ success: true, credentialId: result.id, state: result.state });
     } catch (error) {
       res.status(500).send({ error: error.message });

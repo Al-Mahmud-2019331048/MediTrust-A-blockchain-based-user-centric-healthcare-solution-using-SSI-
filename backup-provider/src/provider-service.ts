@@ -1,5 +1,6 @@
 import { LevelDBAdapter } from './storage/leveldb';
 import { verifyWithPatientKey } from '../../crypto/encryption/src/signing-utils';
+import { consumeDeleteNonce } from './nonce-guard';
 
 // The backup provider is deliberately "dumb": it stores and returns opaque
 // signed tokens, never encryption keys, never plaintext, and never anything
@@ -142,6 +143,14 @@ export async function listEntries(patientDID: string, limit?: number): Promise<s
  * genuine, provable deletion (not append-only), which is exactly the
  * property an immutable-ledger-style backend (e.g. BigchainDB, considered
  * and rejected earlier) could not offer.
+ *
+ * Requires a fresh `nonce` inside the signed token, consumed exactly once
+ * (see nonce-guard.ts) — a signature alone only proves the patient's key
+ * produced this token at some point, not that it's being presented for the
+ * first time. Found live during 2026-08-12 stress testing: without this, a
+ * delete-all token captured once (valid 10 years, per signing-utils.ts)
+ * remained a standing "wipe this patient's backups" capability forever,
+ * replayable even after new legitimate entries were pushed post-deletion.
  */
 export async function deleteAll(patientDID: string, token: string): Promise<{ deleted: number }> {
   const registeredKey = await getRegisteredKey(patientDID);
@@ -157,6 +166,12 @@ export async function deleteAll(patientDID: string, token: string): Promise<{ de
   }
   if (decoded.patientDID !== patientDID || decoded.action !== 'delete-all') {
     throw new ProviderError(400, 'Delete token payload does not authorize deleting this patient');
+  }
+  if (typeof decoded.nonce !== 'string' || !decoded.nonce) {
+    throw new ProviderError(400, 'Delete token is missing a nonce — refusing to authorize a replayable delete');
+  }
+  if (!consumeDeleteNonce(decoded.nonce)) {
+    throw new ProviderError(401, 'This delete-all token has already been used — possible replay, delete refused');
   }
 
   const entries = await LevelDBAdapter.scan({ prefix: entryPrefix(patientDID) });

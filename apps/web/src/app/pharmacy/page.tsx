@@ -21,6 +21,7 @@ const LABEL_OVERRIDES: Record<string, string> = {
   documentHash: 'Document hash',
   patientName: 'Patient name',
   issuedBy: 'Issued by',
+  issuerDid: 'Issuer DID',
   issuedAt: 'Issued at',
 };
 

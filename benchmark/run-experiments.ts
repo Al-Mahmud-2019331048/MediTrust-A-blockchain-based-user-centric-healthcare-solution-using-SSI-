@@ -6,7 +6,7 @@ import path from 'path';
 import { splitMEK } from '../crypto/sss/src/key-splitter';
 import { reconstructKey } from '../crypto/sss/src/key-reconstructor';
 import { AuditService } from '../audit/src/services/audit-service';
-import { createTestPatientAgent, connectTestPatientTo, pollUntil, isReachable, randomHex, shutdownAllTestPatients } from './test-patient-helper';
+import { createTestPatientAgent, connectTestPatientTo, pollUntil, isReachable, randomHex, shutdownAllTestPatients, waitForNewCredentialDone } from './test-patient-helper';
 import { runSelectiveDisclosurePayloadAndLatency, runConcurrentCredentialWorkflows } from './selective-disclosure-experiments';
 
 const DWN_URL = (process.env.PATIENT_DWN_URL || 'http://localhost:5050').replace(/\/$/, '');
@@ -340,6 +340,27 @@ async function runVcIssuanceAndVerification(): Promise<void> {
     }
 
     experiments.push({ name: issuanceName, metric: 'ms', status: 'ok', value: Number(issuanceTimeMs.toFixed(3)), detail: 'Real AnonCreds credential issuance' });
+
+    // Sending the proof request immediately after /issue-credential responds
+    // is a race — that HTTP call only reflects the OFFER being sent, not the
+    // holder having actually stored the credential yet (offer-received ->
+    // request-sent -> credential-received -> done still have to happen over
+    // real async DIDComm). This is exactly why "VC verification time" was
+    // blocked in every sampled run through 2026-08-16: the proof request
+    // reliably beat the credential into the holder's wallet, so
+    // selectCredentialsForRequest found nothing and threw, and the holder's
+    // proof-state listener never retries. Same race already diagnosed and
+    // fixed for the selective-disclosure experiment — see
+    // waitForNewCredentialDone() in test-patient-helper.ts.
+    if (!(await waitForNewCredentialDone(testPatient, new Set()))) {
+      experiments.push({
+        name: verificationName,
+        metric: 'ms',
+        status: 'blocked',
+        detail: 'Credential never reached "done" state in the holder wallet within 15s — cannot send a proof request against it',
+      });
+      return;
+    }
 
     const t1 = performance.now();
     const proofRes = await fetch(`${GOV_URL}/send-proof-request`, {

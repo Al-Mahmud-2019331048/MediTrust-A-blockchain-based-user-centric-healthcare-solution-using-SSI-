@@ -39,13 +39,16 @@ app.listen(apiPort, async () => {
   // Healthcare-authority registers its own schema + credential definition for
   // the ProfessionalRoleCredential it issues to doctors — separate from
   // government's identity credential and hospital-authorization credential.
+  // Attributes match the paper's Provider Credential (Section 6.1), plus
+  // `role`, which the DWN reads from this credential's proof to bind a
+  // grant's actorRole (dwn/patient-node/src/interfaces/role-verification.ts).
   // Falls back to a dummy credDef id on failure so routes still mount.
   let credentialDefinitionId = 'dummy-credential-definition-id-for-healthcare-authority';
   try {
     const schemaResult = await agent.createSchema(agentDid, {
       name: 'professional_role_credential',
       version: `1.0.${Math.floor(Math.random() * 100)}`,
-      attrNames: ['role', 'licenseId', 'issuedAt'],
+      attrNames: ['role', 'licenseNumber', 'specialization', 'hospitalAffiliation', 'validityPeriod'],
       issuerId: agentDid,
     });
     if (schemaResult.schemaState.state !== 'finished') {

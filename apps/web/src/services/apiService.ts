@@ -54,6 +54,11 @@ export interface IssuePatientCredentialResult {
   message?: string;
   isW3C?: boolean;
   credentialId?: string;
+  // Set when the second, independent extended-profile credential
+  // (medicalCondition/bloodType/emergencyContact) was also issued —
+  // undefined if that credDef wasn't registered this boot (best-effort, see
+  // government-agent's credential-routes.ts).
+  extendedProfileCredentialId?: string;
   // Stable identifier for this patient, independent of any DIDComm
   // connection — see government-agent's credential-routes.ts.
   patientAccountId?: string;

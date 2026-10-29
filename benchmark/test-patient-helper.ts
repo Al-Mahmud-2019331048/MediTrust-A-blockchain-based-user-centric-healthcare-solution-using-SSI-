@@ -125,6 +125,45 @@ export async function connectTestPatientTo(
   return connection ? { connectionId: connection.id } : undefined;
 }
 
+// Sending a proof request immediately after /issue-credential returns is a
+// race: that HTTP call only reflects the OFFER being sent, not the holder
+// having actually stored the credential (offer-received -> request-sent ->
+// credential-received -> done all still have to happen over real DIDComm).
+// A proof request that arrives before "done" finds zero matching credentials
+// and getCredentialsForAnonCredsProofRequest throws "Unable to automatically
+// select requested attributes." — confirmed exactly this way in an earlier
+// run. Polling the holder's OWN in-process credential record (rather than
+// guessing a fixed sleep) removes the race outright.
+//
+// Deliberately does NOT filter by connectionId: each side of a DIDComm
+// connection keeps its own separate local connection record (and thus its
+// own local ID) for the same logical pairwise relationship — the
+// connectionId returned by connectTestPatientTo() is the other agent's own
+// ID for the connection, which never matches the holder's local
+// credential-record connectionId. Confirmed by direct inspection (a debug
+// script logging real record contents). Since credential issuance in these
+// benchmark/e2e scripts is always done one connection at a time,
+// sequentially, waiting for "one more done record than before" is
+// unambiguous and avoids the cross-party ID mismatch entirely.
+//
+// Originally lived only in selective-disclosure-experiments.ts, where it was
+// applied after the exact same race was diagnosed there — but
+// run-experiments.ts's runVcIssuanceAndVerification() has the identical
+// issue-then-immediately-prove pattern and never got the same fix, which is
+// why "VC verification time" was blocked in every sampled run (2026-08-16).
+// Promoted here so both callers share one implementation instead of the bug
+// existing in one copy and the fix in the other.
+export async function waitForNewCredentialDone(testPatient: BaseAgent, alreadyDoneIds: Set<string>, timeoutMs = 15000): Promise<string | undefined> {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    const records: any[] = await testPatient.getIssuedCredentialRecords();
+    const newDone = records.find((r) => r.state === 'done' && !alreadyDoneIds.has(r.id));
+    if (newDone) return newDone.id;
+    await new Promise((r) => setTimeout(r, 300));
+  }
+  return undefined;
+}
+
 // Call once, near the end of a script's main(), after every experiment/step
 // that might have called createTestPatientAgent() has finished (success or
 // failure). Shuts down and deletes the wallet for every test-patient created

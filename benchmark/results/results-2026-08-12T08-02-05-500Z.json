@@ -1,0 +1,128 @@
+{
+  "experiments": [
+    {
+      "name": "DWN storage overhead",
+      "metric": "ratio (encrypted footprint / plaintext bytes)",
+      "status": "ok",
+      "value": 1.351,
+      "detail": "plaintext=251B, encrypted footprint=339B"
+    },
+    {
+      "name": "Selective sharing overhead",
+      "metric": "ms (filtered read avg − full read avg, both grant-based)",
+      "status": "ok",
+      "value": -0.632,
+      "detail": "n=20 each; full grant-based read avg=2.051ms, Protocol-filtered read avg=1.419ms (both non-self, so neither pays the accessPolicy computation cost — isolates pure field-filtering overhead)"
+    },
+    {
+      "name": "Access revocation time",
+      "metric": "seconds",
+      "status": "ok",
+      "value": 0.005769,
+      "detail": "revokeAccess call latency; subsequent read returned 403 (expected 403)"
+    },
+    {
+      "name": "SSS recovery time",
+      "metric": "ms",
+      "status": "ok",
+      "value": 0.245,
+      "detail": "reconstructKey() with 3 of 5 shares"
+    },
+    {
+      "name": "SSS split time (bonus)",
+      "metric": "ms",
+      "status": "ok",
+      "value": 0.101,
+      "detail": "splitMEK() into 5 shares, threshold 3"
+    },
+    {
+      "name": "Key recovery success rate",
+      "metric": "%",
+      "status": "ok",
+      "value": 100,
+      "detail": "10/10 valid-threshold reconstructions matched original; 10/10 insufficient-share attempts correctly threw"
+    },
+    {
+      "name": "Blockchain transaction latency",
+      "metric": "seconds",
+      "status": "ok",
+      "value": 1.773,
+      "detail": "Real schema registration on BCovrin (POST /create-schema)"
+    },
+    {
+      "name": "VC issuance time",
+      "metric": "ms",
+      "status": "ok",
+      "value": 2960.536,
+      "detail": "Real AnonCreds credential issuance"
+    },
+    {
+      "name": "VC verification time",
+      "metric": "ms",
+      "status": "blocked",
+      "detail": "Proof verification did not complete within 20s"
+    },
+    {
+      "name": "Selective disclosure payload reduction",
+      "metric": "%",
+      "status": "ok",
+      "value": -245.98,
+      "detail": "Selective proof (3 attrs + age predicate): 18977 bytes. Full-reveal proof (all 5 attrs): 5485 bytes. Real AnonCreds presentations fetched via /proof-data."
+    },
+    {
+      "name": "Selective disclosure latency cost",
+      "metric": "ms",
+      "status": "ok",
+      "value": 4980.426,
+      "detail": "Selective request→verified: 15073.4ms. Full-reveal request→verified: 10093.0ms. Positive value = selective disclosure cost more."
+    },
+    {
+      "name": "Selective disclosure payload reduction (attribute count only, no predicate)",
+      "metric": "%",
+      "status": "ok",
+      "value": -2.06,
+      "detail": "Selective proof, no predicate (3 attrs only): 5598 bytes. Full-reveal proof (all 5 attrs): 5485 bytes. Isolates attribute-count reduction from predicate cost."
+    },
+    {
+      "name": "Selective disclosure latency cost (attribute count only, no predicate)",
+      "metric": "ms",
+      "status": "ok",
+      "value": -2519.2,
+      "detail": "Selective (no predicate) request→verified: 7573.8ms. Full-reveal request→verified: 10093.0ms. Positive value = selective disclosure cost more."
+    },
+    {
+      "name": "Concurrent credential workflow scalability",
+      "metric": "concurrent workflows",
+      "status": "blocked",
+      "detail": "Error: The operation was aborted due to timeout"
+    }
+  ],
+  "attacks": [
+    {
+      "name": "1. Read record without a permission grant",
+      "passed": true,
+      "detail": "status=403, error=\"No active permission grant for this record\""
+    },
+    {
+      "name": "2. SSS reconstruction with only 2 shares",
+      "passed": true,
+      "detail": "At least 3 shares required to reconstruct the MEK, got 2"
+    },
+    {
+      "name": "3. MPOA recovery attempt before all 3 approvals",
+      "passed": true,
+      "detail": "status=403, error=\"Cannot reconstruct — request status is 'pending', must be 'approved'\""
+    },
+    {
+      "name": "4. Expired MPOA request reconstruction attempt",
+      "passed": true,
+      "detail": "status=403, error=\"Cannot reconstruct — request status is 'expired', must be 'approved'\""
+    },
+    {
+      "name": "5. Tampered audit entry verification",
+      "passed": true,
+      "detail": "genuine event verify()=true (expected true), tampered resourceId verify()=false (expected false)"
+    }
+  ],
+  "generatedAt": "2026-08-12T08:02:05.500Z"
+}

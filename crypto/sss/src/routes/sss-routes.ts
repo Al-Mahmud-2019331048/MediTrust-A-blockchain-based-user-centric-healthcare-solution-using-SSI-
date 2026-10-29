@@ -42,6 +42,12 @@ sssRouter.post('/split', async (req: Request, res: Response) => {
     }
 
     const mekBuffer = Buffer.from(mek, 'hex');
+    // Found via fuzz testing (2026-08-12): invalid/wrong-length hex reached
+    // splitMEK() unchecked and threw a raw internal error ("MEK must be 32
+    // bytes for AES-256, got N") as an unhandled 500 instead of a clean 400.
+    if (mekBuffer.length !== 32) {
+      return res.status(400).json({ error: `mek must decode to 32 bytes, got ${mekBuffer.length}` });
+    }
     const result = await splitMEK(mekBuffer);
 
     await AuditService.record({
@@ -93,10 +99,16 @@ sssRouter.post('/recovery/initiate-with-split', async (req: Request, res: Respon
     const { patientDid, mek, expiryHours } = req.body;
     if (!patientDid) return res.status(400).json({ error: 'patientDid is required' });
     if (!mek || typeof mek !== 'string') return res.status(400).json({ error: 'mek (hex string) is required' });
+    // Validated before initiateRecovery() below so a malformed mek never
+    // leaves behind an orphaned recovery request with no shares attached —
+    // same fuzz-testing-found gap as POST /split above.
+    const mekBuffer = Buffer.from(mek, 'hex');
+    if (mekBuffer.length !== 32) {
+      return res.status(400).json({ error: `mek must decode to 32 bytes, got ${mekBuffer.length}` });
+    }
 
     const request = typeof expiryHours === 'number' ? initiateRecovery(patientDid, expiryHours) : initiateRecovery(patientDid);
 
-    const mekBuffer = Buffer.from(mek, 'hex');
     const splitResult = await splitMEK(mekBuffer);
     const taggedRequest = attachIssuedShares(request.requestId, splitResult.shares);
 
@@ -153,7 +165,16 @@ sssRouter.get('/recovery/:requestId/status', (req: Request, res: Response) => {
 // Body: { shares: SSSShare[] }
 sssRouter.post('/recovery/:requestId/reconstruct', async (req: Request, res: Response) => {
   try {
-    const status = getRecoveryStatus(req.params.requestId);
+    // getRecoveryStatus() throws for an unknown requestId — found via fuzz
+    // testing (2026-08-12) that this fell through to the generic 500 catch
+    // below instead of 404, unlike the sibling GET /:requestId/status
+    // handler just above, which already handles this correctly.
+    let status;
+    try {
+      status = getRecoveryStatus(req.params.requestId);
+    } catch (err) {
+      return res.status(404).json({ error: (err as Error).message });
+    }
     if (status.status !== 'approved') {
       return res.status(403).json({ error: `Cannot reconstruct — request status is '${status.status}', must be 'approved'` });
     }

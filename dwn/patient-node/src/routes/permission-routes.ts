@@ -5,8 +5,9 @@ import { AuditService } from '../../../../audit/src/services/audit-service';
 import { attemptAnchor } from '../../../../audit/src/services/anchor-client';
 import { sha256String } from '../../../../crypto/encryption/src/hash-utils';
 import { getOrCreateSigningKey } from '../encryption/patient-signing-key';
-import { isValidPatientDID } from '../utils/validation';
+import { isValidPatientDID, isValidRecordType } from '../utils/validation';
 import { consumeNonce } from '../utils/nonce-guard';
+import { isRateLimited } from '../utils/rate-limit';
 
 export const permissionRouter = Router();
 
@@ -41,8 +42,41 @@ permissionRouter.post('/shareRecord', async (req: Request, res: Response) => {
     if (!isValidPatientDID(patientDID)) {
       return res.status(400).json({ error: 'patientDID must be a valid UUID' });
     }
-    if (typeof nonce !== 'string' || !consumeNonce(nonce)) {
-      return res.status(409).json({ error: 'This nonce has already been used — possible replay, grant rejected' });
+    // Same class of bug as storeRecord's identical guard in record-routes.ts
+    // (found via fuzz testing, 2026-08-12): a non-string recordType passed
+    // the bare truthiness check above, got persisted into the permission,
+    // and only then crashed this route's own audit-log write with an
+    // unhandled 500 — after the malformed grant had already been created.
+    if (!isValidRecordType(recordType)) {
+      return res.status(400).json({ error: "recordType must be one of 'medical', 'prescription', 'lab_report'" });
+    }
+    if (typeof grantedToDID !== 'string' || !grantedToDID) {
+      return res.status(400).json({ error: 'grantedToDID must be a non-empty string' });
+    }
+    if (typeof purpose !== 'string' || !purpose) {
+      return res.status(400).json({ error: 'purpose must be a non-empty string' });
+    }
+    if (allowedFields !== undefined && (!Array.isArray(allowedFields) || !allowedFields.every((f) => typeof f === 'string'))) {
+      return res.status(400).json({ error: 'allowedFields must be an array of strings' });
+    }
+    if (typeof nonce !== 'string') {
+      return res.status(400).json({ error: 'nonce must be a string' });
+    }
+    // Same unauthenticated write-throttling gap as storeRecord (see its
+    // identical guard in record-routes.ts) — found 2026-08-12 stress testing.
+    if (isRateLimited(`shareRecord:${patientDID}`, 30, 60_000)) {
+      return res.status(429).json({ error: 'Too many grants for this patient — try again in a minute.' });
+    }
+    const requestFingerprint = sha256String(
+      JSON.stringify({ patientDID, grantedToDID, recordType, purpose, expiresAt, allowedFields, actorRole, roleProofRecordId, verifierAgentBaseUrl })
+    );
+    const { accepted, mismatchedReplay } = consumeNonce(nonce, requestFingerprint);
+    if (!accepted) {
+      return res.status(409).json({
+        error: mismatchedReplay
+          ? 'This nonce was already used for a different request — possible tampering, grant rejected'
+          : 'This nonce has already been used — possible replay, grant rejected',
+      });
     }
 
     if (actorRole && !roleProofRecordId) {
@@ -70,6 +104,15 @@ permissionRouter.post('/shareRecord', async (req: Request, res: Response) => {
       }
       if ((err as Error).message.startsWith('expiresAt is not a valid date')) {
         return res.status(400).json({ error: (err as Error).message });
+      }
+      // Found via fuzz testing (2026-08-12): an actorRole grant with no
+      // verifierAgentBaseUrl AND no VERIFIER_AGENT_BASE_URL env var configured
+      // fell through to the generic 500 catch below. It already failed
+      // closed (no permission is created either way — role-verification.ts
+      // throws before grantPermission() ever persists anything), just with
+      // a confusing status code instead of a clear "not configured" one.
+      if ((err as Error).message.includes('VERIFIER_AGENT_BASE_URL is not set')) {
+        return res.status(503).json({ error: (err as Error).message });
       }
       throw err;
     }
