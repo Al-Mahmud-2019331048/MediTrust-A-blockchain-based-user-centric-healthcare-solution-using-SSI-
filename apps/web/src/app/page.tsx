@@ -5,7 +5,7 @@ const PORTALS = [
     href: '/government',
     title: 'Government Portal',
     role: 'Issuer',
-    description: 'Issue a verified identity credential to a patient’s Bifold wallet.',
+    description: 'Verify a patient by National ID and registered phone, then issue an identity credential to their wallet.',
     accent: 'from-blue-500 to-blue-600',
   },
   {

@@ -10,6 +10,7 @@ import { registerDebugRoutes } from '../shared/debug-routes';
 import { registerVerifierRoutes } from '../shared/verifier-routes';
 import { registerGovernmentRoutes, registerHospitalAuthorizationRoute } from './src/routes/credential-routes';
 import { registerAnchorRoutes } from './src/routes/anchor-routes';
+import { registerVerificationRoutes } from './src/routes/verification-routes';
 
 const apiPort = parseInt(process.env.GOVERNMENT_API_PORT || '4000');
 const agentPort = apiPort + 1;
@@ -154,6 +155,7 @@ app.listen(apiPort, async () => {
   registerGovernmentRoutes(app, agent, agentDid, () => credentialDefinitionId, () => extendedProfileCredDefId);
   registerHospitalAuthorizationRoute(app, agent, agentDid, () => hospitalAuthorizationCredDefId);
   registerAnchorRoutes(app, agent, agentDid);
+  registerVerificationRoutes(app);
   registerCommonRoutes(app, agent, commonConfig, proofCache);
   registerVerifierRoutes(app, agent, proofCache);
   registerDebugRoutes(app, agent, agentLabel, agentPublicEndpoint, apiPort, '--issuer', agentDid, credentialDefinitionId);

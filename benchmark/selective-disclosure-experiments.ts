@@ -1,4 +1,4 @@
-import { createTestPatientAgent, connectTestPatientTo, pollUntil, isReachable, waitForNewCredentialDone } from './test-patient-helper';
+import { createTestPatientAgent, connectTestPatientTo, pollUntil, isReachable, waitForNewCredentialDone, verifyTestCitizen } from './test-patient-helper';
 
 const GOV_URL = `http://localhost:${process.env.GOVERNMENT_API_PORT || '4000'}`;
 
@@ -12,11 +12,14 @@ export interface ExperimentResult {
 
 // Exported (not just used internally) so benchmark/anoncreds-concurrency-ceiling.ts
 // can reuse this exact, already-proven-correct issuance call instead of duplicating it.
+// `label` is kept for call-site readability only — the credential's name now
+// comes from the citizen registry after phone verification.
 export async function issueRealCredential(connectionId: string, label: string): Promise<boolean> {
+  const verificationId = await verifyTestCitizen(GOV_URL, connectionId);
   const issueRes = await fetch(`${GOV_URL}/issue-credential`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ connectionId, name: label, nationalId: '999999999' }),
+    body: JSON.stringify({ connectionId, verificationId }),
     signal: AbortSignal.timeout(20000),
   });
   const issueBody = await issueRes.json();

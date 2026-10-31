@@ -64,9 +64,61 @@ export interface IssuePatientCredentialResult {
   patientAccountId?: string;
 }
 
-export async function issuePatientCredential(connectionId: string, patientData: {
-  name: string; age: string | number; email: string;
-  nationalId: string; medicalCondition: string; bloodType: string; emergencyContact: string;
+// Agent routes return { error } on failure — surface that message rather
+// than the raw response body.
+async function errorMessage(response: Response): Promise<string> {
+  const text = await response.text();
+  try {
+    return JSON.parse(text).error ?? text;
+  } catch {
+    return text || `Server responded with ${response.status}`;
+  }
+}
+
+export interface VerifiedCitizen {
+  nationalId: string;
+  name: string;
+  age: number;
+}
+
+// Step 1 of identity verification: the government checks the phone is a SIM
+// registered to this NID and sends it a one-time code.
+export async function startIdentityVerification(connectionId: string, nationalId: string, phoneNumber: string): Promise<{
+  verificationId: string; maskedPhone: string; expiresInSeconds: number;
+}> {
+  const response = await fetch(`${AGENT_ENDPOINTS.government}/identity-verification/start`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ connectionId, nationalId, phoneNumber }),
+  });
+  if (!response.ok) throw new Error(await errorMessage(response));
+  return response.json();
+}
+
+// Step 2: the patient enters the code they received.
+export async function confirmIdentityVerification(verificationId: string, code: string): Promise<VerifiedCitizen> {
+  const response = await fetch(`${AGENT_ENDPOINTS.government}/identity-verification/confirm`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ verificationId, code }),
+  });
+  if (!response.ok) throw new Error(await errorMessage(response));
+  return (await response.json()).citizen;
+}
+
+// SIMULATED SMS inbox — stands in for the patient's phone (no real SMS gateway).
+export async function getSimulatedSms(phoneNumber: string): Promise<{
+  phoneNumber: string; messages: { message: string; sentAt: string }[];
+}> {
+  const response = await fetch(`${AGENT_ENDPOINTS.government}/simulated-sms/${encodeURIComponent(phoneNumber)}`);
+  if (!response.ok) throw new Error(await errorMessage(response));
+  return response.json();
+}
+
+// Name, age and NID are not sent — the government takes them from its own
+// records for the verified person. Only self-declared fields go here.
+export async function issuePatientCredential(connectionId: string, verificationId: string, profile: {
+  email: string; medicalCondition: string; bloodType: string; emergencyContact: string;
 }): Promise<IssuePatientCredentialResult> {
   const isAvailable = await checkAgentAvailability('government');
   if (!isAvailable) throw new Error('Government agent is not available');
@@ -74,10 +126,10 @@ export async function issuePatientCredential(connectionId: string, patientData: 
   const response = await fetch(`${AGENT_ENDPOINTS.government}/issue-credential`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ connectionId, ...patientData }),
+    body: JSON.stringify({ connectionId, verificationId, ...profile }),
   });
 
-  if (!response.ok) throw new Error(`Server responded with ${response.status}: ${await response.text()}`);
+  if (!response.ok) throw new Error(await errorMessage(response));
   return response.json();
 }
 

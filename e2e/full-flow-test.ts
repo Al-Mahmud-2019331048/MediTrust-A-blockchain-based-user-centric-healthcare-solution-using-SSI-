@@ -4,11 +4,13 @@ dotenv.config();
 import fs from 'fs';
 import path from 'path';
 import { AuditService } from '../audit/src/services/audit-service';
-import { createTestPatientAgent, connectTestPatientTo, pollUntil, isReachable, randomHex, shutdownAllTestPatients } from '../benchmark/test-patient-helper';
+import { createTestPatientAgent, connectTestPatientTo, pollUntil, isReachable, randomHex, shutdownAllTestPatients, verifyTestCitizen } from '../benchmark/test-patient-helper';
 import { extractRevealedAttributes } from '../agents/shared/proof-parser';
 
 const DWN_URL = (process.env.PATIENT_DWN_URL || 'http://localhost:5050').replace(/\/$/, '');
 const GOV_URL = `http://localhost:${process.env.GOVERNMENT_API_PORT || '4000'}`;
+// Registry test citizen used for the identity-verification step before issuance.
+const E2E_TEST_NID = '0000000001';
 const DOCTOR_URL = `http://localhost:${process.env.DOCTOR_API_PORT || '4002'}`;
 
 interface StepResult {
@@ -48,19 +50,27 @@ async function main() {
     if (!govConnection) {
       steps.push({ step: '2. VC (identity issuance)', status: 'blocked', detail: 'Connection to government-agent did not complete within 15s' });
     } else {
-      const issueRes = await fetch(`${GOV_URL}/issue-credential`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ connectionId: govConnection.connectionId, name: 'E2E Patient', nationalId: '000000000' }),
-        signal: AbortSignal.timeout(20000),
-      });
-      const issueBody = await issueRes.json();
-      if (issueBody.isW3C) {
-        steps.push({ step: '2. VC (identity issuance)', status: 'degraded', detail: 'Fell back to W3C message (ledger connectivity unavailable) — not a real ZKP-backed VC, see CLAUDE.md Known Constraints' });
-      } else if (issueRes.ok && issueBody.success) {
-        steps.push({ step: '2. VC (identity issuance)', status: 'ok', detail: 'Real AnonCreds identity credential issued' });
-      } else {
-        steps.push({ step: '2. VC (identity issuance)', status: 'blocked', detail: `Issuance failed: ${JSON.stringify(issueBody).slice(0, 200)}` });
+      let verificationId: string | undefined;
+      try {
+        verificationId = await verifyTestCitizen(GOV_URL, govConnection.connectionId, E2E_TEST_NID);
+      } catch (err) {
+        steps.push({ step: '2. VC (identity issuance)', status: 'blocked', detail: `Phone identity verification failed: ${(err as Error).message}` });
+      }
+      if (verificationId) {
+        const issueRes = await fetch(`${GOV_URL}/issue-credential`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ connectionId: govConnection.connectionId, verificationId }),
+          signal: AbortSignal.timeout(20000),
+        });
+        const issueBody = await issueRes.json();
+        if (issueBody.isW3C) {
+          steps.push({ step: '2. VC (identity issuance)', status: 'degraded', detail: 'Fell back to W3C message (ledger connectivity unavailable) — not a real ZKP-backed VC, see CLAUDE.md Known Constraints' });
+        } else if (issueRes.ok && issueBody.success) {
+          steps.push({ step: '2. VC (identity issuance)', status: 'ok', detail: 'Real AnonCreds identity credential issued after phone identity verification' });
+        } else {
+          steps.push({ step: '2. VC (identity issuance)', status: 'blocked', detail: `Issuance failed: ${JSON.stringify(issueBody).slice(0, 200)}` });
+        }
       }
     }
   }

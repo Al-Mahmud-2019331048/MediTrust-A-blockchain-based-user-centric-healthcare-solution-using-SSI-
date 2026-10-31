@@ -1,7 +1,14 @@
 import { Express, Request, Response } from "express";
 import { BaseAgent } from "../../../shared/agent-base";
-import { generateId } from "../../../../crypto/encryption/src/hash-utils";
 import { AuditService } from "../../../../audit/src/services/audit-service";
+import {
+  claimVerification,
+  completeVerification,
+  releaseVerification,
+  getOrCreateAccountId,
+  VerificationError,
+  VerifiedCitizen,
+} from "../identity-verification";
 
 // Registers all government (issuer) agent routes
 export function registerGovernmentRoutes(
@@ -24,12 +31,25 @@ export function registerGovernmentRoutes(
   // itself makes the restriction structural: a verifier scoped to the core
   // credDef cannot receive medicalCondition/bloodType/emergencyContact, full
   // stop, regardless of what any given proof request asks for.
+  //
+  // Requires a verificationId from a completed phone verification on this
+  // same connection (identity-verification.ts). name/age/nationalId come
+  // from the citizen registry, not the request body. email and the extended
+  // profile fields are self-declared — no national record holds them.
   app.post("/issue-credential", async (req: Request, res: Response) => {
-    const { connectionId, name, email, age, nationalId, medicalCondition, bloodType, emergencyContact } = req.body;
+    const { connectionId, verificationId, email, medicalCondition, bloodType, emergencyContact } = req.body;
 
     if (!connectionId) return res.status(400).send({ error: "connectionId is required" });
     const credDefId = getCredDefId();
     if (!credDefId) return res.status(400).send({ error: "credentialDefinitionId is required" });
+
+    let citizen: VerifiedCitizen;
+    try {
+      citizen = claimVerification(verificationId, connectionId);
+    } catch (error) {
+      if (error instanceof VerificationError) return res.status(error.httpStatus).send({ error: error.message });
+      throw error;
+    }
 
     // A stable identifier for this patient, independent of any specific
     // DIDComm connection — Aries "Connections" mints a brand-new pairwise
@@ -42,13 +62,14 @@ export function registerGovernmentRoutes(
     // folder name in the DWN, so a real PII value shouldn't be reused here.
     // Carried only by the core credential — the extended-profile schema
     // matches the paper's data model (Section 6.1) and has no account ID.
-    const patientAccountId = generateId();
+    // One account per NID: re-verifying returns the same account.
+    const patientAccountId = getOrCreateAccountId(citizen.nationalId);
 
     const coreAttributes = [
-      { name: "name", value: `${name ?? "John Doe"}` },
-      { name: "age", value: `${age ?? 30}` },
-      { name: "email", value: `${email ?? "patient@example.com"}` },
-      { name: "nationalId", value: `${nationalId ?? "123456789"}` },
+      { name: "name", value: citizen.name },
+      { name: "age", value: `${citizen.age}` },
+      { name: "email", value: `${email || "not-provided"}` },
+      { name: "nationalId", value: citizen.nationalId },
       { name: "patientAccountId", value: patientAccountId },
     ];
     const extendedAttributes = [
@@ -92,8 +113,9 @@ export function registerGovernmentRoutes(
         resourceId: result.id,
         resourceType: "identity_credential",
         action: "issueAnonCredsCredential",
-        metadata: { connectionId, isW3C: false },
+        metadata: { connectionId, isW3C: false, identityVerification: "registered-sim-otp" },
       });
+      completeVerification(verificationId);
       const extendedProfileCredentialId = await issueExtendedProfile();
       res.status(200).send({
         success: true,
@@ -125,8 +147,9 @@ export function registerGovernmentRoutes(
           resourceId: w3cResult.id,
           resourceType: "identity_credential",
           action: "issueAnonCredsCredential",
-          metadata: { connectionId, isW3C: true },
+          metadata: { connectionId, isW3C: true, identityVerification: "registered-sim-otp" },
         });
+        completeVerification(verificationId);
 
         let w3cExtendedId: string | undefined;
         try {
@@ -160,6 +183,7 @@ export function registerGovernmentRoutes(
           patientAccountId,
         });
       } catch (_w3cError) {}
+      releaseVerification(verificationId);
       res.status(500).send({ error: error.message });
     }
   });

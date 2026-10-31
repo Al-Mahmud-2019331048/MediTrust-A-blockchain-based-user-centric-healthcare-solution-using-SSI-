@@ -1,0 +1,14 @@
+{
+  "_note": "SIMULATED data, all people and numbers are made up. Stands in for the Election Commission's NID records (nationalId, name, dateOfBirth) joined with BTRC's biometric SIM-registration records (registeredSims: every SIM registered against that NID — one NID can have several). A real deployment would query those authorities instead of this file.",
+  "citizens": [
+    { "nationalId": "1987031401", "name": "Rahima Akter", "dateOfBirth": "1987-03-14", "registeredSims": ["01711000101", "01811000102"] },
+    { "nationalId": "1995110202", "name": "Tanvir Hossain", "dateOfBirth": "1995-11-02", "registeredSims": ["01911000201"] },
+    { "nationalId": "2001062103", "name": "Nusrat Jahan", "dateOfBirth": "2001-06-21", "registeredSims": ["01611000301", "01511000302", "01311000303"] },
+    { "nationalId": "1958010904", "name": "Abdul Karim", "dateOfBirth": "1958-01-09", "registeredSims": ["01711000401"] },
+    { "nationalId": "1990083005", "name": "Farhana Islam", "dateOfBirth": "1990-08-30", "registeredSims": ["01811000501", "01911000502"] },
+    { "nationalId": "0000000001", "name": "E2E Test Citizen", "dateOfBirth": "1990-01-01", "registeredSims": ["01700000011", "01700000012", "01700000013"] },
+    { "nationalId": "0000000002", "name": "Benchmark Test Citizen A", "dateOfBirth": "1990-01-01", "registeredSims": ["01700000021", "01700000022", "01700000023"] },
+    { "nationalId": "0000000003", "name": "Benchmark Test Citizen B", "dateOfBirth": "1990-01-01", "registeredSims": ["01700000031", "01700000032", "01700000033"] },
+    { "nationalId": "0000000004", "name": "Benchmark Test Citizen C", "dateOfBirth": "1990-01-01", "registeredSims": ["01700000041", "01700000042", "01700000043"] }
+  ]
+}

@@ -44,3 +44,6 @@ benchmark/figures/venv/
 # Local session notes for Claude (kept on disk, not tracked)
 CLAUDE.md
 CONTEXT.md
+
+# Government agent NID -> patient account map (identity verification)
+agents/government-agent/data/

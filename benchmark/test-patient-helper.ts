@@ -1,4 +1,6 @@
 import { BaseAgent } from '../agents/shared/agent-base';
+import fs from 'fs';
+import path from 'path';
 
 // Shared by Day 18's benchmark and Day 19's E2E test: spins up a temporary
 // automated agent standing in for what Bifold (the real patient mobile
@@ -173,4 +175,61 @@ export async function waitForNewCredentialDone(testPatient: BaseAgent, alreadyDo
 export async function shutdownAllTestPatients(): Promise<void> {
   await Promise.all(createdTestPatients.map((agent) => agent.shutdown()));
   createdTestPatients.length = 0;
+}
+
+// /issue-credential requires a completed phone verification (2026-10-30, see
+// agents/government-agent/src/identity-verification.ts). This runs that flow
+// for one of the registry's test citizens, reading the code from the
+// government agent's simulated SMS inbox exactly as the portal's inbox page
+// does. Without a nationalId, it rotates across the three benchmark test
+// citizens and all their SIMs, so repeated issuance in one run (the
+// concurrency experiments) spreads across numbers instead of tripping the
+// per-phone/per-NID code rate limits.
+const BENCHMARK_TEST_NIDS = ['0000000002', '0000000003', '0000000004'];
+let benchmarkSimIndex = 0;
+
+function registeredSims(nationalId: string): string[] {
+  const registryPath = path.resolve(__dirname, '../agents/government-agent/src/registry/citizen-registry.json');
+  const citizens: { nationalId: string; registeredSims: string[] }[] = JSON.parse(fs.readFileSync(registryPath, 'utf8')).citizens;
+  const citizen = citizens.find((c) => c.nationalId === nationalId);
+  if (!citizen) throw new Error(`Test citizen ${nationalId} is not in the citizen registry`);
+  return citizen.registeredSims;
+}
+
+export async function verifyTestCitizen(govUrl: string, connectionId: string, nationalId?: string): Promise<string> {
+  let nid = nationalId;
+  let phoneNumber: string;
+  if (nid) {
+    phoneNumber = registeredSims(nid)[0];
+  } else {
+    const pairs = BENCHMARK_TEST_NIDS.flatMap((n) => registeredSims(n).map((sim) => ({ n, sim })));
+    const pair = pairs[benchmarkSimIndex++ % pairs.length];
+    nid = pair.n;
+    phoneNumber = pair.sim;
+  }
+
+  const startRes = await fetch(`${govUrl}/identity-verification/start`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ connectionId, nationalId: nid, phoneNumber }),
+    signal: AbortSignal.timeout(10000),
+  });
+  const startBody = await startRes.json();
+  if (!startRes.ok) throw new Error(`Identity verification start failed: ${startBody.error}`);
+
+  const inboxRes = await fetch(`${govUrl}/simulated-sms/${phoneNumber}`, { signal: AbortSignal.timeout(10000) });
+  const latest: string | undefined = (await inboxRes.json()).messages[0]?.message;
+  const code = latest?.match(/\b(\d{6})\b/)?.[1];
+  if (!code) throw new Error(`No verification code found in the simulated inbox for ${phoneNumber}`);
+
+  const confirmRes = await fetch(`${govUrl}/identity-verification/confirm`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ verificationId: startBody.verificationId, code }),
+    signal: AbortSignal.timeout(10000),
+  });
+  const confirmBody = await confirmRes.json();
+  if (!confirmRes.ok) throw new Error(`Identity verification confirm failed: ${confirmBody.error}`);
+
+  return startBody.verificationId;
 }

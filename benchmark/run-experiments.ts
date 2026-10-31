@@ -6,7 +6,7 @@ import path from 'path';
 import { splitMEK } from '../crypto/sss/src/key-splitter';
 import { reconstructKey } from '../crypto/sss/src/key-reconstructor';
 import { AuditService } from '../audit/src/services/audit-service';
-import { createTestPatientAgent, connectTestPatientTo, pollUntil, isReachable, randomHex, shutdownAllTestPatients, waitForNewCredentialDone } from './test-patient-helper';
+import { createTestPatientAgent, connectTestPatientTo, pollUntil, isReachable, randomHex, shutdownAllTestPatients, waitForNewCredentialDone, verifyTestCitizen } from './test-patient-helper';
 import { runSelectiveDisclosurePayloadAndLatency, runConcurrentCredentialWorkflows } from './selective-disclosure-experiments';
 
 const DWN_URL = (process.env.PATIENT_DWN_URL || 'http://localhost:5050').replace(/\/$/, '');
@@ -306,11 +306,14 @@ async function runVcIssuanceAndVerification(): Promise<void> {
       return;
     }
 
+    // Phone verification happens before t0 — it's a separate step from
+    // issuance, so it stays out of the "VC issuance time" measurement.
+    const verificationId = await verifyTestCitizen(GOV_URL, connection.connectionId);
     const t0 = performance.now();
     const issueRes = await fetch(`${GOV_URL}/issue-credential`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ connectionId: connection.connectionId, name: 'Benchmark Patient', nationalId: '000000000' }),
+      body: JSON.stringify({ connectionId: connection.connectionId, verificationId }),
       signal: AbortSignal.timeout(20000),
     });
     const issuanceTimeMs = performance.now() - t0;
