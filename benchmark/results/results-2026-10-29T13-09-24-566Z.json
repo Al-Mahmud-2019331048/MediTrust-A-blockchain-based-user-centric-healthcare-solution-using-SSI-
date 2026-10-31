@@ -1,0 +1,123 @@
+{
+  "experiments": [
+    {
+      "name": "DWN storage overhead",
+      "metric": "ratio (encrypted footprint / plaintext bytes)",
+      "status": "ok",
+      "value": 1.351,
+      "detail": "plaintext=251B, encrypted footprint=339B"
+    },
+    {
+      "name": "Selective sharing overhead",
+      "metric": "ms (filtered read avg − full read avg, both grant-based)",
+      "status": "ok",
+      "value": -2.271,
+      "detail": "n=20 each; full grant-based read avg=69.031ms, Protocol-filtered read avg=66.760ms (both non-self, so neither pays the accessPolicy computation cost — isolates pure field-filtering overhead)"
+    },
+    {
+      "name": "Access revocation time",
+      "metric": "seconds",
+      "status": "ok",
+      "value": 0.007393,
+      "detail": "revokeAccess call latency; subsequent read returned 403 (expected 403)"
+    },
+    {
+      "name": "SSS recovery time",
+      "metric": "ms",
+      "status": "ok",
+      "value": 0.229,
+      "detail": "reconstructKey() with 3 of 5 shares"
+    },
+    {
+      "name": "SSS split time (bonus)",
+      "metric": "ms",
+      "status": "ok",
+      "value": 0.098,
+      "detail": "splitMEK() into 5 shares, threshold 3"
+    },
+    {
+      "name": "Key recovery success rate",
+      "metric": "%",
+      "status": "ok",
+      "value": 100,
+      "detail": "10/10 valid-threshold reconstructions matched original; 10/10 insufficient-share attempts correctly threw"
+    },
+    {
+      "name": "Blockchain transaction latency",
+      "metric": "seconds",
+      "status": "ok",
+      "value": 1.984,
+      "detail": "Real schema registration on BCovrin (POST /create-schema)"
+    },
+    {
+      "name": "VC issuance time",
+      "metric": "ms",
+      "status": "ok",
+      "value": 4638.887,
+      "detail": "Real AnonCreds credential issuance"
+    },
+    {
+      "name": "VC verification time",
+      "metric": "ms",
+      "status": "ok",
+      "value": 15743.465,
+      "detail": "Real AnonCreds ZKP proof verification"
+    },
+    {
+      "name": "Selective disclosure payload reduction",
+      "metric": "%",
+      "status": "ok",
+      "value": -245.7,
+      "detail": "Selective proof (3 attrs + age predicate): 18941 bytes. Full-reveal proof (all 5 attrs): 5479 bytes. Real AnonCreds presentations fetched via /proof-data."
+    },
+    {
+      "name": "Selective disclosure latency cost",
+      "metric": "ms",
+      "status": "ok",
+      "value": 5976.031,
+      "detail": "Selective request→verified: 14576.2ms. Full-reveal request→verified: 8600.2ms. Positive value = selective disclosure cost more."
+    },
+    {
+      "name": "Selective disclosure payload reduction (attribute count only, no predicate)",
+      "metric": "%",
+      "status": "ok",
+      "value": -1.9,
+      "detail": "Selective proof, no predicate (3 attrs only): 5583 bytes. Full-reveal proof (all 5 attrs): 5479 bytes. Isolates attribute-count reduction from predicate cost."
+    },
+    {
+      "name": "Selective disclosure latency cost (attribute count only, no predicate)",
+      "metric": "ms",
+      "status": "ok",
+      "value": -2531.967,
+      "detail": "Selective (no predicate) request→verified: 6068.2ms. Full-reveal request→verified: 8600.2ms. Positive value = selective disclosure cost more."
+    }
+  ],
+  "attacks": [
+    {
+      "name": "1. Read record without a permission grant",
+      "passed": true,
+      "detail": "status=403, error=\"No active permission grant for this record\""
+    },
+    {
+      "name": "2. SSS reconstruction with only 2 shares",
+      "passed": true,
+      "detail": "At least 3 shares required to reconstruct the MEK, got 2"
+    },
+    {
+      "name": "3. MPOA recovery attempt before all 3 approvals",
+      "passed": true,
+      "detail": "status=403, error=\"Cannot reconstruct — request status is 'pending', must be 'approved'\""
+    },
+    {
+      "name": "4. Expired MPOA request reconstruction attempt",
+      "passed": true,
+      "detail": "status=403, error=\"Cannot reconstruct — request status is 'expired', must be 'approved'\""
+    },
+    {
+      "name": "5. Tampered audit entry verification",
+      "passed": true,
+      "detail": "genuine event verify()=true (expected true), tampered resourceId verify()=false (expected false)"
+    }
+  ],
+  "generatedAt": "2026-10-29T13:09:24.566Z"
+}
