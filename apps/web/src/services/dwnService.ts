@@ -34,15 +34,104 @@ export interface Permission {
   revokedAt: string | null;
 }
 
+// --- Wallet-login session (2026-11-07) ---
+// Owner actions (reading your records, granting/revoking access, notifications,
+// key recovery, restore) need a session token from POST /dwn/session, which
+// the DWN only issues for a verified wallet login proof. The token is kept in
+// sessionStorage so a page reload in the same tab stays logged in; it is
+// never put in localStorage (it would outlive the tab and leak across tabs).
+
+export interface DwnSession {
+  token: string;
+  patientDID: string;
+  expiresAt: string;
+}
+
+const SESSION_STORAGE_KEY = 'meditrust-dwn-session';
+export const SESSION_EXPIRED_EVENT = 'meditrust-dwn-session-expired';
+let currentSession: DwnSession | null = null;
+
+export function getStoredSession(): DwnSession | null {
+  if (currentSession) return currentSession;
+  try {
+    const raw = sessionStorage.getItem(SESSION_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as DwnSession;
+    if (!parsed.token || Date.parse(parsed.expiresAt) <= Date.now()) return null;
+    currentSession = parsed;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function storeSession(session: DwnSession | null) {
+  currentSession = session;
+  try {
+    if (session) sessionStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(session));
+    else sessionStorage.removeItem(SESSION_STORAGE_KEY);
+  } catch {
+    // storage unavailable (private mode etc.) — in-memory session still works
+  }
+}
+
+function authHeaders(): Record<string, string> {
+  const session = getStoredSession();
+  return session ? { Authorization: `Bearer ${session.token}` } : {};
+}
+
+export async function createSession(proofRecordId: string): Promise<DwnSession> {
+  const response = await fetch(`${DWN_URL}/dwn/session`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ proofRecordId }),
+  });
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(body.error || `Login failed (${response.status})`);
+  storeSession(body as DwnSession);
+  return body as DwnSession;
+}
+
+// Confirms a stored token is still accepted by the DWN (e.g. after a DWN
+// restart, which clears all sessions).
+export async function checkSession(): Promise<DwnSession | null> {
+  const session = getStoredSession();
+  if (!session) return null;
+  try {
+    const response = await fetch(`${DWN_URL}/dwn/session`, { headers: authHeaders() });
+    if (response.ok) return session;
+  } catch {
+    return session; // DWN unreachable — keep the session, calls will surface the error
+  }
+  storeSession(null);
+  return null;
+}
+
+export async function logout(): Promise<void> {
+  const headers = authHeaders();
+  storeSession(null);
+  try {
+    await fetch(`${DWN_URL}/dwn/session`, { method: 'DELETE', headers });
+  } catch {
+    // already logged out locally
+  }
+}
+
 async function asJson(response: Response) {
   const body = await response.json().catch(() => ({}));
+  if (response.status === 401 && currentSession) {
+    // Session expired or DWN restarted — send the dashboard back to login.
+    storeSession(null);
+    if (typeof window !== 'undefined') window.dispatchEvent(new Event(SESSION_EXPIRED_EVENT));
+  }
   if (!response.ok) throw new Error(body.error || `Server responded with ${response.status}`);
   return body;
 }
 
-export async function queryRecords(patientDID: string, requesterDID: string = patientDID): Promise<DWNRecordSummary[]> {
+export async function queryRecords(patientDID: string): Promise<DWNRecordSummary[]> {
   const response = await fetch(
-    `${DWN_URL}/dwn/queryRecord?patientDID=${encodeURIComponent(patientDID)}&requesterDID=${encodeURIComponent(requesterDID)}`
+    `${DWN_URL}/dwn/queryRecord?patientDID=${encodeURIComponent(patientDID)}`,
+    { headers: authHeaders() }
   );
   const body = await asJson(response);
   return Array.isArray(body) ? body : [body];
@@ -57,7 +146,7 @@ export async function shareRecord(input: {
   const nonce = crypto.randomUUID();
   const response = await fetch(`${DWN_URL}/dwn/shareRecord`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...authHeaders() },
     body: JSON.stringify({ ...input, nonce }),
   });
   return asJson(response);
@@ -66,7 +155,7 @@ export async function shareRecord(input: {
 export async function revokeAccess(input: { patientDID: string; grantedToDID: string; recordType: string }) {
   const response = await fetch(`${DWN_URL}/dwn/revokeAccess`, {
     method: 'DELETE',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...authHeaders() },
     body: JSON.stringify(input),
   });
   return asJson(response);
@@ -89,6 +178,7 @@ export async function initiateSelfCustody(patientDID: string): Promise<{
 }> {
   const response = await fetch(`${DWN_URL}/dwn/patients/${encodeURIComponent(patientDID)}/self-custody/initiate`, {
     method: 'POST',
+    headers: authHeaders(),
   });
   return asJson(response);
 }
@@ -96,7 +186,7 @@ export async function initiateSelfCustody(patientDID: string): Promise<{
 export async function restoreSelfCustody(patientDID: string, shares: SelfCustodyShare[]) {
   const response = await fetch(`${DWN_URL}/dwn/patients/${encodeURIComponent(patientDID)}/self-custody/restore`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...authHeaders() },
     body: JSON.stringify({ shares }),
   });
   return asJson(response);
@@ -110,6 +200,7 @@ export async function getMekStatus(patientDID: string): Promise<{ hasMEK: boolea
 export async function restoreData(patientDID: string) {
   const response = await fetch(`${DWN_URL}/dwn/patients/${encodeURIComponent(patientDID)}/restore-data`, {
     method: 'POST',
+    headers: authHeaders(),
   });
   return asJson(response);
 }
@@ -129,7 +220,8 @@ export interface DwnNotification {
 
 export async function getNotifications(patientDID: string, limit = 20): Promise<DwnNotification[]> {
   const response = await fetch(
-    `${DWN_URL}/dwn/patients/${encodeURIComponent(patientDID)}/notifications?requesterDID=${encodeURIComponent(patientDID)}&limit=${limit}`
+    `${DWN_URL}/dwn/patients/${encodeURIComponent(patientDID)}/notifications?limit=${limit}`,
+    { headers: authHeaders() }
   );
   const body = await asJson(response);
   return body.notifications as DwnNotification[];

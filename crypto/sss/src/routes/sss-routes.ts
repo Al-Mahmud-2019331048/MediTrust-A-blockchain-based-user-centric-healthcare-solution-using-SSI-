@@ -1,4 +1,5 @@
 import { Router, Request, Response } from 'express';
+import { checkServiceToken, SERVICE_TOKEN_HEADER } from '../../../encryption/src/service-token';
 import { splitMEK } from '../key-splitter';
 import { reconstructKey } from '../key-reconstructor';
 import { initiateRecovery, approveRecovery, getRecoveryStatus, registerApproverKey, attachIssuedShares } from '../mpoa-controller';
@@ -8,6 +9,19 @@ import { sha256String } from '../../../encryption/src/hash-utils';
 import { SSSShare } from '../../../../agents/shared/types';
 
 export const sssRouter = Router();
+
+function requireServiceToken(req: Request, res: Response): boolean {
+  const result = checkServiceToken(req.header(SERVICE_TOKEN_HEADER));
+  if (result === 'unset') {
+    res.status(503).json({ error: 'SSS_SERVICE_TOKEN is not set — refusing an unauthenticated call' });
+    return false;
+  }
+  if (result !== 'ok') {
+    res.status(401).json({ error: 'Only the patient DWN may call this endpoint' });
+    return false;
+  }
+  return true;
+}
 
 // POST /sss/mpoa/register-key
 // Body: { patientDid, approverRole, publicKeyPem }
@@ -19,7 +33,13 @@ export const sssRouter = Router();
 // key really belongs to the real hospital/guardian in the world — that
 // binding needs a real institutional DID/credential, out of scope for this
 // PoC and accepted as a named limitation, not something this route solves.
+//
+// 2026-11-08: only the DWN may call this (x-service-token = SSS_SERVICE_TOKEN),
+// on behalf of a patient logged in with their wallet — see the DWN's
+// POST /dwn/patients/:id/mpoa/register-approver. Before, anyone could
+// overwrite a patient's approver keys here and then sign every approval.
 sssRouter.post('/mpoa/register-key', (req: Request, res: Response) => {
+  if (!requireServiceToken(req, res)) return;
   try {
     const { patientDid, approverRole, publicKeyPem } = req.body;
     if (!patientDid || !approverRole || !publicKeyPem) {
@@ -94,7 +114,10 @@ sssRouter.post('/recovery/initiate', (req: Request, res: Response) => {
 // Does not replace /split or /recovery/initiate — both are unchanged and
 // still usable standalone (e.g. by attack-simulation tests that only need a
 // bare pending/expired request with no real shares behind it).
+// 2026-11-08: DWN-only (service token) — the DWN calls this from its
+// owner-only /mpoa/initiate-split with the patient's real key.
 sssRouter.post('/recovery/initiate-with-split', async (req: Request, res: Response) => {
+  if (!requireServiceToken(req, res)) return;
   try {
     const { patientDid, mek, expiryHours } = req.body;
     if (!patientDid) return res.status(400).json({ error: 'patientDid is required' });
@@ -247,7 +270,33 @@ sssRouter.post('/recovery/:requestId/reconstruct', async (req: Request, res: Res
       .then((anchor) => AuditService.markAnchored(keyReconstructedEvent.eventId, anchor))
       .catch(() => {});
 
-    res.json({ mek: mek.toString('hex'), reconstructTimeMs });
+    // Opt-in (2026-11-07): hand the rebuilt key straight to the patient's
+    // DWN, authenticated with the shared SSS_SERVICE_TOKEN — the DWN's
+    // mpoa/complete-restore accepts keys only from this service. The
+    // patient is taken from the approved recovery request, never from the
+    // caller.
+    let dwnRestore: { status: number; body: unknown } | undefined;
+    if (req.body.restoreToDwn === true) {
+      const dwnUrl = (process.env.PATIENT_DWN_URL || 'http://localhost:5050').replace(/\/$/, '');
+      const token = process.env.SSS_SERVICE_TOKEN;
+      if (!token) {
+        dwnRestore = { status: 503, body: { error: 'SSS_SERVICE_TOKEN is not set — cannot forward the key to the DWN' } };
+      } else {
+        try {
+          const forward = await fetch(`${dwnUrl}/dwn/patients/${encodeURIComponent(status.patientDid)}/mpoa/complete-restore`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', [SERVICE_TOKEN_HEADER]: token },
+            body: JSON.stringify({ mek: mek.toString('hex') }),
+            signal: AbortSignal.timeout(15_000),
+          });
+          dwnRestore = { status: forward.status, body: await forward.json().catch(() => ({})) };
+        } catch (err) {
+          dwnRestore = { status: 502, body: { error: `Could not reach the DWN: ${(err as Error).message}` } };
+        }
+      }
+    }
+
+    res.json({ mek: mek.toString('hex'), reconstructTimeMs, ...(dwnRestore ? { dwnRestore } : {}) });
   } catch (err: unknown) {
     res.status(500).json({ error: (err as Error).message });
   }

@@ -94,7 +94,8 @@ export type AuditEventType =
     | 'vp_generated'
     | 'dwn_restored'
     | 'backup_integrity_check_failed'
-    | 'document_integrity_check_failed';
+    | 'document_integrity_check_failed'
+    | 'patient_login';
 
 export interface SSSShare {
     shareId: string;

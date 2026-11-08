@@ -4,6 +4,7 @@ dotenv.config();
 import express from 'express';
 import cors from 'cors';
 import { BaseAgent } from '../shared/agent-base';
+import { configureDwnSigner } from '../shared/dwn-client';
 import { createProofStatusCache } from '../shared/cache-utils';
 import { registerCommonRoutes, AgentConfig } from '../shared/common-routes';
 import { registerVerifierRoutes } from '../shared/verifier-routes';
@@ -37,6 +38,8 @@ app.listen(apiPort, async () => {
   });
 
   await agent.importDid(agentDid, agentSeed);
+  // Sign every DWN request with this agent's ledger key (2026-11-07).
+  configureDwnSigner(agentDid, agentSeed);
 
   // Pharmacy is verifier-only — it never issues credentials, so it creates no
   // schema/credDef of its own (matches the legacy reference exactly). It

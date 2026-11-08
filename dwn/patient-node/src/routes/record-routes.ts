@@ -10,6 +10,8 @@ import { isValidPatientDID, isValidRecordType, isValidContentType } from '../uti
 import { consumeNonce } from '../utils/nonce-guard';
 import { isRateLimited } from '../utils/rate-limit';
 import { sha256, sha256String } from '../../../../crypto/encryption/src/hash-utils';
+import { isTrustedProvider } from '../auth/provider-signature';
+import { sessionPatientDID } from '../auth/session';
 
 const BINARY_CONTENT_TYPES: DWNRecord['contentType'][] = [
   'application/pdf',
@@ -20,14 +22,24 @@ const BINARY_CONTENT_TYPES: DWNRecord['contentType'][] = [
 export const recordRouter = Router();
 
 // POST /storeRecord — mounted at /dwn/storeRecord by server.ts (Day 13)
-// Body: { patientDID, recordType, protocol, contentType, fileName?, data, authorDID?, nonce }
+// Body: { patientDID, recordType, protocol, contentType, fileName?, data, nonce }
+// Must be signed by a trusted provider (2026-11-07, see auth/provider-signature.ts).
+// The author is the signed DID; any authorDID in the body is ignored.
 // data is a JSON string/object for contentType 'application/json', or a base64
 // string for binary contentTypes. nonce must be a fresh, caller-generated
 // value never sent before — guards against a captured request being replayed
 // to silently duplicate a write.
 recordRouter.post('/storeRecord', async (req: Request, res: Response) => {
   try {
-    const { patientDID, recordType, protocol, contentType, fileName, data, authorDID, nonce } = req.body;
+    // Only trusted, signed providers (doctor agents) may write — previously
+    // writes were fully unauthenticated, so anyone could plant a fake
+    // medical record in any patient's vault.
+    const providerDID = res.locals.providerDID as string | undefined;
+    if (!providerDID || !isTrustedProvider(providerDID)) {
+      return res.status(401).json({ error: 'storeRecord must be signed by a trusted provider' });
+    }
+    const authorDID = providerDID;
+    const { patientDID, recordType, protocol, contentType, fileName, data, nonce } = req.body;
 
     if (!patientDID || !recordType || !protocol || !contentType || data === undefined || !nonce) {
       return res.status(400).json({
@@ -62,9 +74,6 @@ recordRouter.post('/storeRecord', async (req: Request, res: Response) => {
     }
     if (fileName !== undefined && fileName !== null && typeof fileName !== 'string') {
       return res.status(400).json({ error: 'fileName must be a string' });
-    }
-    if (authorDID !== undefined && authorDID !== null && typeof authorDID !== 'string') {
-      return res.status(400).json({ error: 'authorDID must be a string' });
     }
     if (typeof nonce !== 'string') {
       return res.status(400).json({ error: 'nonce must be a string' });
@@ -123,7 +132,7 @@ recordRouter.post('/storeRecord', async (req: Request, res: Response) => {
 
     await AuditService.record({
       eventType: 'document_written',
-      actorDid: authorDID ?? patientDID,
+      actorDid: authorDID,
       targetDid: patientDID,
       resourceId: record.recordId,
       resourceType: recordType,
@@ -180,7 +189,8 @@ recordRouter.post('/storeRecord', async (req: Request, res: Response) => {
 });
 
 // GET /queryRecord — mounted at /dwn/queryRecord by server.ts (Day 13)
-// Query params: recordId? | patientDID? & recordType? | requesterDID (required)
+// Query params: recordId? | patientDID? & recordType?  (requesterDID is ignored since 2026-11-07)
+// Caller must be a signed provider or a patient with a wallet-login session.
 // The patient always may read their own records (self-read exemption, full
 // record, no field redaction). Any other requester needs an active permission
 // grant (PermissionsInterface) and gets field-level redaction applied: the
@@ -193,10 +203,19 @@ recordRouter.get('/queryRecord', async (req: Request, res: Response) => {
     const recordId = req.query.recordId as string | undefined;
     const patientDID = req.query.patientDID as string | undefined;
     const recordType = req.query.recordType as string | undefined;
-    const requesterDID = req.query.requesterDID as string | undefined;
+    // Who is asking is decided by proof, never by the requesterDID query
+    // value (2026-11-07; that parameter is now ignored):
+    //  - a signed provider (doctor/pharmacy agent) is its verified DID and
+    //    reads only under the patient's grants;
+    //  - a patient is the account their wallet-login session belongs to and
+    //    reads only their own records;
+    //  - anyone else is rejected.
+    const signedProviderDID = res.locals.providerDID as string | undefined;
+    const sessionDID = signedProviderDID ? null : sessionPatientDID(req);
+    const requesterDID = signedProviderDID ?? sessionDID;
 
     if (!requesterDID) {
-      return res.status(400).json({ error: 'requesterDID is required' });
+      return res.status(401).json({ error: 'Log in with your wallet (patients) or sign the request (providers) to read records' });
     }
     // Every real caller already knows which patient they're asking about
     // (a self-read passes its own patientDID, a grant-based read passes the
@@ -226,10 +245,14 @@ recordRouter.get('/queryRecord', async (req: Request, res: Response) => {
     const grantByRecordId = new Map<string, Permission | null>();
     const denied: DWNRecord[] = [];
     for (const record of records) {
-      const isSelf = requesterDID === record.patientDID;
+      const isSelf = sessionDID !== null && sessionDID === record.patientDID;
       if (isSelf) {
         authorized.push(record);
         grantByRecordId.set(record.recordId, null);
+        continue;
+      }
+      if (!signedProviderDID) {
+        denied.push(record);
         continue;
       }
       // Multiple active grants for the same {patientDID, grantedToDID,
@@ -249,23 +272,28 @@ recordRouter.get('/queryRecord', async (req: Request, res: Response) => {
       }
     }
 
+    const deniedActor = requesterDID;
+
     if (recordId && denied.length > 0) {
       await AuditService.record({
         eventType: 'access_denied',
-        actorDid: requesterDID,
+        actorDid: deniedActor,
         targetDid: denied[0].patientDID,
         resourceId: recordId,
         resourceType: denied[0].recordType,
         action: 'readRecord',
         metadata: {},
       });
+      if (!signedProviderDID) {
+        return res.status(403).json({ error: 'This record belongs to a different account' });
+      }
       return res.status(403).json({ error: 'No active permission grant for this record' });
     }
 
     if (!recordId && denied.length > 0) {
       await AuditService.record({
         eventType: 'access_denied',
-        actorDid: requesterDID,
+        actorDid: deniedActor,
         targetDid: patientDID ?? 'multiple',
         resourceId: `query:patientDID=${patientDID ?? '*'}:recordType=${recordType ?? '*'}`,
         resourceType: recordType ?? 'record',

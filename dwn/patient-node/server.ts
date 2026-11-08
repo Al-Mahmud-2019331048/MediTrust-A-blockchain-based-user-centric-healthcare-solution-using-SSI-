@@ -10,7 +10,9 @@ import { selfCustodyRouter } from './src/routes/self-custody-routes';
 import { mpoaBridgeRouter } from './src/routes/mpoa-bridge-routes';
 import { restoreRouter } from './src/routes/restore-routes';
 import { notificationRouter } from './src/routes/notification-routes';
+import { sessionRouter } from './src/routes/session-routes';
 import { LevelDBAdapter } from './src/storage/leveldb';
+import { providerSignatureMiddleware } from './src/auth/provider-signature';
 
 const app = express();
 // Originally this server had no CORS handling at all — every caller was an
@@ -24,7 +26,11 @@ const app = express();
 app.use(cors());
 // Default Express JSON limit (100kb) is too small for base64-encoded
 // images/PDFs that storeRecord accepts inline in the request body.
-app.use(express.json({ limit: '25mb' }));
+// verify keeps the raw bytes so provider signatures can be checked over the
+// exact body that was signed, not a re-serialized copy.
+app.use(express.json({ limit: '25mb', verify: (req: Request, _res, buf) => { req.rawBody = buf; } }));
+// Provider (doctor/pharmacy) request signatures — see src/auth/provider-signature.ts.
+app.use(providerSignatureMiddleware);
 
 app.get('/health', (_req: Request, res: Response) => {
   res.json({ status: 'ok' });
@@ -40,6 +46,7 @@ app.use('/dwn', selfCustodyRouter);
 app.use('/dwn', mpoaBridgeRouter);
 app.use('/dwn', restoreRouter);
 app.use('/dwn', notificationRouter);
+app.use('/dwn', sessionRouter);
 
 app.use((_req: Request, res: Response) => {
   res.status(404).json({ error: 'Not found' });
@@ -61,6 +68,9 @@ const port = parseInt(process.env.DWN_PORT || '5050');
 
 const server = app.listen(port, () => {
   console.log(`DWN patient node listening on http://localhost:${port}`);
+  if (process.env.DWN_ALLOW_TEST_SESSIONS === 'true') {
+    console.warn('WARNING: DWN_ALLOW_TEST_SESSIONS=true — test-only sessions without a wallet login are ENABLED. Benchmarks only; never use this for a demo or deployment.');
+  }
 });
 
 async function shutdown(signal: string) {

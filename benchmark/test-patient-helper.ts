@@ -1,4 +1,5 @@
 import { BaseAgent } from '../agents/shared/agent-base';
+import { signRequest } from '../crypto/encryption/src/request-signing';
 import fs from 'fs';
 import path from 'path';
 
@@ -232,4 +233,68 @@ export async function verifyTestCitizen(govUrl: string, connectionId: string, na
   if (!confirmRes.ok) throw new Error(`Identity verification confirm failed: ${confirmBody.error}`);
 
   return startBody.verificationId;
+}
+
+// --- DWN caller authentication helpers (2026-11-08) ---
+
+export interface DwnLoginSession {
+  token: string;
+  patientDID: string;
+  expiresAt: string;
+  // The login proof this session came from — kept so tests can confirm a
+  // proof can't be exchanged for a second session.
+  proofRecordId: string;
+}
+
+// Logs the test patient in to the DWN the same way the Patient Dashboard
+// does: the Government agent sends a login proof request over an existing
+// connection, the test wallet answers it (auto-accept is wired in
+// createTestPatientAgent), and the proof's ID is exchanged at the DWN for a
+// session token. The wallet must already hold a Government identity
+// credential.
+export async function loginTestPatient(govUrl: string, connectionId: string, dwnUrl: string, timeoutMs = 30000): Promise<DwnLoginSession> {
+  const requestRes = await fetch(`${govUrl}/request-login-proof`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ connectionId }),
+    signal: AbortSignal.timeout(10000),
+  });
+  const requestBody = await requestRes.json();
+  if (!requestRes.ok) throw new Error(`Login proof request failed: ${requestBody.error}`);
+
+  const verified = await pollUntil(async () => {
+    const statusRes = await fetch(`${govUrl}/proof-status/${requestBody.proofRecordId}`);
+    const status = await statusRes.json();
+    return status.isVerified ? status : undefined;
+  }, timeoutMs, 500);
+  if (!verified) throw new Error('Login proof did not verify in time');
+
+  const sessionRes = await fetch(`${dwnUrl}/dwn/session`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ proofRecordId: requestBody.proofRecordId }),
+  });
+  const session = await sessionRes.json();
+  if (!sessionRes.ok) throw new Error(`DWN session failed: ${session.error}`);
+  return { ...session, proofRecordId: requestBody.proofRecordId } as DwnLoginSession;
+}
+
+export function bearer(session: DwnLoginSession): Record<string, string> {
+  return { Authorization: `Bearer ${session.token}` };
+}
+
+// Signs a DWN request as one of the real, trusted providers (keys from .env),
+// exactly as the doctor/pharmacy agents do (agents/shared/dwn-client.ts).
+// pathWithQuery must be the exact path + query string sent, e.g.
+// `/dwn/queryRecord?recordId=...`.
+export function providerHeaders(
+  provider: 'doctor' | 'pharmacy',
+  method: string,
+  pathWithQuery: string,
+  body = ''
+): Record<string, string> {
+  const did = provider === 'doctor' ? process.env.DOCTOR_DID : process.env.PHARMACY_DID;
+  const seed = provider === 'doctor' ? process.env.DOCTOR_SEED : process.env.PHARMACY_SEED;
+  if (!did || !seed) throw new Error(`${provider.toUpperCase()}_DID/_SEED not set — cannot sign DWN requests`);
+  return signRequest(seed, did, method, pathWithQuery, body);
 }

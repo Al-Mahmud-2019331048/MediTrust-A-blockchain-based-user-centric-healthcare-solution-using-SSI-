@@ -211,6 +211,20 @@ export async function sendProofRequest(agentType: AgentType, connectionId: strin
   return response.json();
 }
 
+// Patient Dashboard wallet login (2026-11-07): asks the Government agent to
+// send the wallet a minimal proof request revealing only patientAccountId.
+// Normalized to { id, state } for useProofVerification's requestFn.
+export async function requestLoginProof(connectionId: string): Promise<{ id: string; state: string }> {
+  const response = await fetch(`${AGENT_ENDPOINTS.government}/request-login-proof`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ connectionId }),
+  });
+  if (!response.ok) throw new Error(`Server responded with ${response.status}: ${await response.text()}`);
+  const body = await response.json();
+  return { id: body.proofRecordId, state: body.state };
+}
+
 // pharmacy-agent's /verify-patient-identity and /verify-prescription both
 // return { success, proofRecordId, state } — normalized here to { id, state }
 // so both can be passed as useProofVerification's requestFn override.

@@ -1,3 +1,4 @@
+import { requireOwner } from '../auth/session';
 import { Router, Request, Response } from 'express';
 import { LevelDBAdapter } from '../storage/leveldb';
 import { getExistingMEK } from '../encryption/mek-store';
@@ -34,6 +35,7 @@ restoreRouter.post('/patients/:patientDID/restore-data', async (req: Request, re
   try {
     const { patientDID } = req.params;
     if (!patientDID) return res.status(400).json({ error: 'patientDID is required' });
+    if (!requireOwner(req, res, patientDID)) return;
 
     let mek: Buffer;
     try {

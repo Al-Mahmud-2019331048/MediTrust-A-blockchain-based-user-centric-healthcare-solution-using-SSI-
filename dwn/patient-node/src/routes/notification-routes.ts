@@ -1,3 +1,4 @@
+import { requireOwner } from '../auth/session';
 import { Router, Request, Response } from 'express';
 import { AuditService, AuditEvent } from '../../../../audit/src/services/audit-service';
 import { isValidPatientDID } from '../utils/validation';
@@ -28,6 +29,8 @@ function toMessage(event: AuditEvent): string {
       return `Your data was restored from backup (${metadata.recordsRestored ?? 0} records, ${metadata.permissionsRestored ?? 0} permissions).`;
     case 'backup_integrity_check_failed':
       return 'A backup entry failed integrity verification — possible tampering detected.';
+    case 'patient_login':
+      return 'You logged in to your dashboard with your wallet.';
     case 'document_integrity_check_failed':
       return `One of your ${event.resourceType} records failed its integrity check on read — possible tampering or corruption detected.`;
     default:
@@ -57,13 +60,9 @@ notificationRouter.get('/patients/:patientDID/notifications', async (req: Reques
       return res.status(400).json({ error: 'patientDID must be a valid UUID' });
     }
 
-    const requesterDID = req.query.requesterDID as string | undefined;
-    if (!requesterDID) {
-      return res.status(400).json({ error: 'requesterDID is required' });
-    }
-    if (requesterDID !== patientDID) {
-      return res.status(403).json({ error: 'Only the patient may view their own notifications' });
-    }
+    // 2026-11-07: the patient must be logged in with their wallet — a
+    // requesterDID query value was only a claim anyone could make.
+    if (!requireOwner(req, res, patientDID)) return;
 
     const parsedLimit = parseInt(req.query.limit as string, 10);
     const limit = Math.min(MAX_LIMIT, Math.max(1, Number.isNaN(parsedLimit) ? DEFAULT_LIMIT : parsedLimit));

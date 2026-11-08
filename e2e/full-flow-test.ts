@@ -4,7 +4,7 @@ dotenv.config();
 import fs from 'fs';
 import path from 'path';
 import { AuditService } from '../audit/src/services/audit-service';
-import { createTestPatientAgent, connectTestPatientTo, pollUntil, isReachable, randomHex, shutdownAllTestPatients, verifyTestCitizen } from '../benchmark/test-patient-helper';
+import { createTestPatientAgent, connectTestPatientTo, pollUntil, isReachable, randomHex, shutdownAllTestPatients, verifyTestCitizen, loginTestPatient, bearer, providerHeaders, DwnLoginSession } from '../benchmark/test-patient-helper';
 import { extractRevealedAttributes } from '../agents/shared/proof-parser';
 
 const DWN_URL = (process.env.PATIENT_DWN_URL || 'http://localhost:5050').replace(/\/$/, '');
@@ -42,11 +42,13 @@ async function main() {
 
   // ---------- Step 2: VC (identity) ----------
   let testPatient;
+  let govConnectionId: string | undefined;
   if (!govUp) {
     steps.push({ step: '2. VC (identity issuance)', status: 'blocked', detail: `government-agent not reachable at ${GOV_URL}` });
   } else {
     testPatient = await createTestPatientAgent(4020);
     const govConnection = await connectTestPatientTo(testPatient, GOV_URL, 'E2E Test Patient');
+    govConnectionId = govConnection?.connectionId;
     if (!govConnection) {
       steps.push({ step: '2. VC (identity issuance)', status: 'blocked', detail: 'Connection to government-agent did not complete within 15s' });
     } else {
@@ -183,11 +185,35 @@ async function main() {
     }
   }
 
+  // ---------- Step 3b: patient wallet login (2026-11-08) ----------
+  // The patient's own DWN actions (self-read, grant, revoke) now need a
+  // session from a wallet login proof — the account ID alone is no longer
+  // enough. Same flow the Patient Dashboard uses.
+  let session: DwnLoginSession | undefined;
+  if (!govConnectionId || !patientDID) {
+    steps.push({ step: '3b. Patient wallet login', status: 'blocked', detail: 'No government connection / patientDID from earlier steps' });
+  } else {
+    try {
+      session = await loginTestPatient(GOV_URL, govConnectionId, DWN_URL);
+      const matches = session.patientDID === patientDID;
+      steps.push({
+        step: '3b. Patient wallet login',
+        status: matches ? 'ok' : 'blocked',
+        detail: matches
+          ? 'Login proof (reveals only patientAccountId) verified; DWN issued a session for the same account the doctor wrote to'
+          : `Session is for ${session.patientDID}, expected ${patientDID}`,
+      });
+    } catch (err) {
+      steps.push({ step: '3b. Patient wallet login', status: 'blocked', detail: (err as Error).message });
+    }
+  }
+  const auth = session ? bearer(session) : {};
+
   // ---------- Step 4: DWN write confirmation ----------
   if (!dwnRecordId || !patientDID) {
     steps.push({ step: '4. DWN write confirmation', status: 'blocked', detail: 'No record was written in step 3 to confirm' });
   } else {
-    const selfReadRes = await fetch(`${DWN_URL}/dwn/queryRecord?recordId=${dwnRecordId}&requesterDID=${patientDID}`);
+    const selfReadRes = await fetch(`${DWN_URL}/dwn/queryRecord?recordId=${dwnRecordId}`, { headers: auth });
     const selfRead = await selfReadRes.json();
     const matches = selfReadRes.status === 200 && selfRead.data?.documentId === originalDocumentData?.documentId;
     steps.push({
@@ -201,13 +227,16 @@ async function main() {
 
   // ---------- Step 5: shareRecord ----------
   let permissionId: string | undefined;
-  const insurerDID = `did:e2e:insurer-${randomHex(4)}`;
+  // The grantee must be a real, trusted provider now that grant-based reads
+  // have to be signed — the pharmacy agent's DID stands in for the old
+  // made-up insurer DID.
+  const insurerDID = process.env.PHARMACY_DID || 'PHARMACY_DID-not-set';
   if (!patientDID) {
     steps.push({ step: '5. shareRecord', status: 'blocked', detail: 'No patientDID established from step 3' });
   } else {
     const shareRes = await fetch(`${DWN_URL}/dwn/shareRecord`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...auth },
       body: JSON.stringify({
         patientDID,
         grantedToDID: insurerDID,
@@ -230,7 +259,8 @@ async function main() {
   if (!patientDID || !dwnRecordId) {
     steps.push({ step: '6. Selective read', status: 'blocked', detail: 'Prerequisite steps did not complete' });
   } else {
-    const res = await fetch(`${DWN_URL}/dwn/queryRecord?recordId=${dwnRecordId}&requesterDID=${insurerDID}`);
+    const readPath = `/dwn/queryRecord?recordId=${dwnRecordId}`;
+    const res = await fetch(`${DWN_URL}${readPath}`, { headers: providerHeaders('pharmacy', 'GET', readPath) });
     const body = await res.json();
     const fields = Object.keys(body.data ?? {}).sort();
     const expected = ['documentType', 'issuedBy'].sort();
@@ -238,7 +268,7 @@ async function main() {
     steps.push({
       step: '6. Selective read',
       status: matches ? 'ok' : 'blocked',
-      detail: matches ? `Insurer sees only [${fields.join(', ')}] as granted — diagnosis/prescription correctly redacted` : `Unexpected fields: [${fields.join(', ')}]`,
+      detail: matches ? `Pharmacy (signed request) sees only [${fields.join(', ')}] as granted — diagnosis/prescription correctly redacted` : `Unexpected fields: [${fields.join(', ')}] (status ${res.status})`,
     });
   }
 
@@ -313,10 +343,11 @@ async function main() {
   } else {
     await fetch(`${DWN_URL}/dwn/revokeAccess`, {
       method: 'DELETE',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...auth },
       body: JSON.stringify({ permissionId }),
     });
-    const afterRevoke = await fetch(`${DWN_URL}/dwn/queryRecord?recordId=${dwnRecordId}&requesterDID=${insurerDID}`);
+    const readPath = `/dwn/queryRecord?recordId=${dwnRecordId}`;
+    const afterRevoke = await fetch(`${DWN_URL}${readPath}`, { headers: providerHeaders('pharmacy', 'GET', readPath) });
     steps.push({
       step: '8. revokeAccess',
       status: afterRevoke.status === 403 ? 'ok' : 'blocked',
@@ -351,7 +382,7 @@ async function main() {
     });
   } else {
     const anchoredRecord = await pollUntil(async () => {
-      const res = await fetch(`${DWN_URL}/dwn/queryRecord?recordId=${dwnRecordId}&requesterDID=${patientDID}`);
+      const res = await fetch(`${DWN_URL}/dwn/queryRecord?recordId=${dwnRecordId}`, { headers: auth });
       if (!res.ok) return undefined;
       const record = await res.json();
       return typeof record.integrityVCId === 'string' && record.integrityVCId.startsWith('indy-anchor-txn-')

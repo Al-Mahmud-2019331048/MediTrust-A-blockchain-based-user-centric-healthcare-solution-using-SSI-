@@ -1,3 +1,4 @@
+import { requireOwner } from '../auth/session';
 import { Router, Request, Response } from 'express';
 import { PermissionsInterface } from '../interfaces/permissions';
 import { backupWrite } from '../backup/backup-service';
@@ -13,7 +14,9 @@ export const permissionRouter = Router();
 
 // POST /shareRecord — mounted at /dwn/shareRecord by server.ts (Day 13)
 // Body: { patientDID, grantedToDID, recordType, purpose, expiresAt?, allowedFields?,
-//         actorRole?, roleProofRecordId?, verifierAgentBaseUrl?, nonce }
+//         actorRole?, roleProofRecordId?, nonce }
+// A verifierAgentBaseUrl field is ignored since 2026-11-07: role proofs are
+// only checked against VERIFIER_AGENT_BASE_URL from the DWN's own config.
 // actorRole and roleProofRecordId must be supplied together — see permissions.ts.
 // nonce must be a fresh, caller-generated value never sent before — guards
 // against a captured grant request being replayed.
@@ -28,7 +31,6 @@ permissionRouter.post('/shareRecord', async (req: Request, res: Response) => {
       allowedFields,
       actorRole,
       roleProofRecordId,
-      verifierAgentBaseUrl,
       nonce,
     } = req.body;
 
@@ -42,6 +44,9 @@ permissionRouter.post('/shareRecord', async (req: Request, res: Response) => {
     if (!isValidPatientDID(patientDID)) {
       return res.status(400).json({ error: 'patientDID must be a valid UUID' });
     }
+    // 2026-11-07: only the patient, logged in with their wallet, may grant
+    // access to their records.
+    if (!requireOwner(req, res, patientDID)) return;
     // Same class of bug as storeRecord's identical guard in record-routes.ts
     // (found via fuzz testing, 2026-08-12): a non-string recordType passed
     // the bare truthiness check above, got persisted into the permission,
@@ -68,7 +73,7 @@ permissionRouter.post('/shareRecord', async (req: Request, res: Response) => {
       return res.status(429).json({ error: 'Too many grants for this patient — try again in a minute.' });
     }
     const requestFingerprint = sha256String(
-      JSON.stringify({ patientDID, grantedToDID, recordType, purpose, expiresAt, allowedFields, actorRole, roleProofRecordId, verifierAgentBaseUrl })
+      JSON.stringify({ patientDID, grantedToDID, recordType, purpose, expiresAt, allowedFields, actorRole, roleProofRecordId })
     );
     const { accepted, mismatchedReplay } = consumeNonce(nonce, requestFingerprint);
     if (!accepted) {
@@ -96,7 +101,6 @@ permissionRouter.post('/shareRecord', async (req: Request, res: Response) => {
         allowedFields,
         actorRole,
         roleProofRecordId,
-        verifierAgentBaseUrl,
       });
     } catch (err: unknown) {
       if ((err as Error).message.startsWith('Role proof verification failed')) {
@@ -106,12 +110,12 @@ permissionRouter.post('/shareRecord', async (req: Request, res: Response) => {
         return res.status(400).json({ error: (err as Error).message });
       }
       // Found via fuzz testing (2026-08-12): an actorRole grant with no
-      // verifierAgentBaseUrl AND no VERIFIER_AGENT_BASE_URL env var configured
+      // VERIFIER_AGENT_BASE_URL env var configured
       // fell through to the generic 500 catch below. It already failed
       // closed (no permission is created either way — role-verification.ts
       // throws before grantPermission() ever persists anything), just with
       // a confusing status code instead of a clear "not configured" one.
-      if ((err as Error).message.includes('VERIFIER_AGENT_BASE_URL is not set')) {
+      if ((err as Error).message.includes('VERIFIER_AGENT_BASE_URL is not set') || (err as Error).message.startsWith('Failed to reach verifier agent')) {
         return res.status(503).json({ error: (err as Error).message });
       }
       throw err;
@@ -166,6 +170,15 @@ permissionRouter.delete('/revokeAccess', async (req: Request, res: Response) => 
         error: 'Either permissionId or {patientDID, grantedToDID, recordType} is required',
       });
     }
+
+    // 2026-11-07: only the logged-in patient who owns the grant may revoke
+    // it. For a permissionId, the owner is read from the stored grant, not
+    // from anything the caller sends.
+    const ownerDID = permissionId ? (await PermissionsInterface.getPermission(permissionId))?.patientDID : patientDID;
+    if (permissionId && !ownerDID) {
+      return res.status(404).json({ error: `Permission ${permissionId} not found` });
+    }
+    if (!requireOwner(req, res, ownerDID)) return;
 
     let result;
     try {

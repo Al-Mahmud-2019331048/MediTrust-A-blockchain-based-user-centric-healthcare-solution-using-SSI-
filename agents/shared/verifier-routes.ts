@@ -32,7 +32,11 @@ export function registerVerifierRoutes(
       proofCache.update(proofRecordId, proofRecord.state, isVerified, proofRecord.connectionId);
 
       const result = await agent.getProofData(proofRecordId);
-      res.status(200).send({ ...result, isVerified, state: proofRecord.state });
+      // updatedAt lets a consumer check how recent the proof is — the DWN's
+      // wallet login (dwn/patient-node/src/auth/session.ts) only accepts
+      // login proofs completed within the last few minutes.
+      const updatedAt = (proofRecord.updatedAt ?? proofRecord.createdAt)?.toISOString?.() ?? null;
+      res.status(200).send({ ...result, isVerified, state: proofRecord.state, updatedAt });
     } catch (error) {
       const cached = proofCache.get(proofRecordId);
       if (cached) {

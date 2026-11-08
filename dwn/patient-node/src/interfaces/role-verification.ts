@@ -3,7 +3,6 @@ import { ProofDataResponse } from '../../../../agents/shared/types';
 export interface VerifyActorRoleProofInput {
   proofRecordId: string;
   expectedRole: string;
-  verifierAgentBaseUrl?: string;
 }
 
 // Confirms a grantedToDID's claimed actorRole is backed by a verified AnonCreds
@@ -12,19 +11,27 @@ export interface VerifyActorRoleProofInput {
 // with the claimed role, rather than trusting a bare self-reported string.
 //
 // Network/parse failures throw (not a silent `false`), so a misconfigured
-// verifierAgentBaseUrl doesn't look identical to "the proof genuinely failed."
+// VERIFIER_AGENT_BASE_URL doesn't look identical to "the proof genuinely failed."
+//
+// The verifier address comes ONLY from this DWN's own config (2026-11-07).
+// It used to accept a caller-supplied verifierAgentBaseUrl, so a caller could
+// point the check at a server they control that simply answers
+// {isVerified: true, role: ...} and make any role claim pass.
 export async function verifyActorRoleProof(input: VerifyActorRoleProofInput): Promise<boolean> {
   const { proofRecordId, expectedRole } = input;
   if (!proofRecordId) throw new Error('proofRecordId is required');
   if (!expectedRole) throw new Error('expectedRole is required');
 
-  const baseUrl = input.verifierAgentBaseUrl ?? process.env.VERIFIER_AGENT_BASE_URL;
-  if (!baseUrl) throw new Error('No verifierAgentBaseUrl provided and VERIFIER_AGENT_BASE_URL is not set');
+  const baseUrl = process.env.VERIFIER_AGENT_BASE_URL;
+  if (!baseUrl) throw new Error('Role verification is not configured: VERIFIER_AGENT_BASE_URL is not set');
+  if (!/^[A-Za-z0-9-]{1,100}$/.test(proofRecordId)) {
+    throw new Error('Role proof verification failed: malformed proofRecordId');
+  }
 
   const url = `${baseUrl.replace(/\/$/, '')}/proof-data/${proofRecordId}`;
   let response: Response;
   try {
-    response = await fetch(url);
+    response = await fetch(url, { signal: AbortSignal.timeout(10_000) });
   } catch (err) {
     throw new Error(`Failed to reach verifier agent at ${url}: ${(err as Error).message}`);
   }

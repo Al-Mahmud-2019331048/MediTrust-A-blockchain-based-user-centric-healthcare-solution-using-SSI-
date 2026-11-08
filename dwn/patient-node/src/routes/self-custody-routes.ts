@@ -1,3 +1,4 @@
+import { requireOwner } from '../auth/session';
 import { Router, Request, Response } from 'express';
 import { getOrCreateMEK, restoreMEK, hasMEK } from '../encryption/mek-store';
 import { splitMEKSelfCustody, reconstructMEKSelfCustody, SelfCustodyShare } from '../../../../crypto/sss/src/self-custody';
@@ -35,6 +36,7 @@ selfCustodyRouter.post('/patients/:patientDID/self-custody/initiate', async (req
   try {
     const { patientDID } = req.params;
     if (!patientDID) return res.status(400).json({ error: 'patientDID is required' });
+    if (!requireOwner(req, res, patientDID)) return;
 
     const { mek, isNewPatient } = await getOrCreateMEK(patientDID);
     const { shares, splitTimeMs, threshold, total } = await splitMEKSelfCustody(mek, patientDID);
@@ -77,6 +79,7 @@ selfCustodyRouter.post('/patients/:patientDID/self-custody/restore', async (req:
   try {
     const { patientDID } = req.params;
     if (!patientDID) return res.status(400).json({ error: 'patientDID is required' });
+    if (!requireOwner(req, res, patientDID)) return;
 
     const shares: SelfCustodyShare[] = req.body.shares;
     if (!Array.isArray(shares) || shares.length < 3) {

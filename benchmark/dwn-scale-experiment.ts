@@ -1,8 +1,12 @@
+import dotenv from 'dotenv';
+dotenv.config();
+
 import fs from 'fs';
 import path from 'path';
 import { spawn } from 'child_process';
 import { setGlobalDispatcher, Agent } from 'undici';
-import { isReachable, randomHex } from './test-patient-helper';
+import { isReachable, providerHeaders } from './test-patient-helper';
+import { serviceTokenHeader } from '../crypto/encryption/src/service-token';
 
 // Storage-layer scale test: simulated concurrent patients, each a distinct
 // crypto.randomUUID() patientDID (existing codebase convention — see
@@ -15,6 +19,19 @@ import { isReachable, randomHex } from './test-patient-helper';
 // dwn/patient-node/src/utils/rate-limit.ts) are structurally never hit here,
 // however high the level goes.
 const DWN_URL = (process.env.PATIENT_DWN_URL || 'http://localhost:5050').replace(/\/$/, '');
+
+// Since 2026-11-08 the DWN checks callers: writes must be signed by a trusted
+// provider and a patient's own read/grant need a session. The simulated
+// patients here have no wallets, so this test uses TEST-ONLY sessions: the
+// DWN must be started with DWN_ALLOW_TEST_SESSIONS=true (set below, so any
+// DWN this script restarts gets it too; a DWN you start yourself needs it
+// in its environment), and the session request carries the SSS service
+// token. Getting the session happens BEFORE each user's timer starts, so
+// the measured workload is the same write + self-read + grant as before,
+// now including the real signature/session checks. Wallet login itself is
+// not part of what this test measures.
+process.env.DWN_ALLOW_TEST_SESSIONS = 'true';
+const GRANTEE_DID = process.env.PHARMACY_DID || 'PHARMACY_DID-not-set';
 
 // A prior 100-500 (step 100) pass found the real OOM ceiling sits between
 // N=100 (100% reliable) and N=300 (0% reliable, every attempt) on this 8GB
@@ -80,31 +97,44 @@ setGlobalDispatcher(new Agent({ connections: Math.max(...LEVELS) }));
 // permission-grant path too, at the cost of 3x the request volume per user.
 async function runOneUser(): Promise<number | undefined> {
   const patientDID = crypto.randomUUID();
-  const grantedToDID = `did:bench:scale-${randomHex(4)}`;
+  const grantedToDID = GRANTEE_DID;
+  let auth: Record<string, string>;
+  try {
+    const sessionRes = await fetch(`${DWN_URL}/dwn/test-session`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...serviceTokenHeader() },
+      body: JSON.stringify({ patientDID }),
+    });
+    if (!sessionRes.ok) return undefined;
+    auth = { Authorization: `Bearer ${(await sessionRes.json()).token}` };
+  } catch {
+    return undefined;
+  }
   const t0 = performance.now();
   try {
+    const storeBody = JSON.stringify({
+      patientDID,
+      recordType: 'medical',
+      protocol: 'ScaleTestProtocol',
+      contentType: 'application/json',
+      data: { note: 'scale-test-record' },
+      nonce: crypto.randomUUID(),
+    });
     const storeRes = await fetch(`${DWN_URL}/dwn/storeRecord`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        patientDID,
-        recordType: 'medical',
-        protocol: 'ScaleTestProtocol',
-        contentType: 'application/json',
-        data: { note: 'scale-test-record' },
-        nonce: crypto.randomUUID(),
-      }),
+      headers: { 'Content-Type': 'application/json', ...providerHeaders('doctor', 'POST', '/dwn/storeRecord', storeBody) },
+      body: storeBody,
     });
     if (!storeRes.ok) return undefined;
     const record = await storeRes.json();
 
-    const readRes = await fetch(`${DWN_URL}/dwn/queryRecord?recordId=${record.recordId}&requesterDID=${patientDID}`);
+    const readRes = await fetch(`${DWN_URL}/dwn/queryRecord?recordId=${record.recordId}`, { headers: auth });
     if (!readRes.ok) return undefined;
     await readRes.json();
 
     const shareRes = await fetch(`${DWN_URL}/dwn/shareRecord`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...auth },
       body: JSON.stringify({
         patientDID,
         grantedToDID,
@@ -195,7 +225,8 @@ async function main() {
       {
         levels: levelSummaries,
         repeatsPerLevel: REPEATS_PER_LEVEL,
-        workloadPerUser: 'storeRecord (write) + self-read queryRecord + shareRecord (grant one field to a second synthetic DID)',
+        workloadPerUser: 'doctor-signed storeRecord (write) + session self-read queryRecord + session shareRecord (grant one field to the pharmacy DID); test-only session obtained before timing',
+        authMode: 'provider signatures + test-only patient sessions (DWN_ALLOW_TEST_SESSIONS=true), since 2026-11-08',
         note:
           'No ledger, no AnonCreds/Askar native bindings touched — pure DWN HTTP + LevelDB + SQLite audit log. Each simulated user is a distinct patientDID, so per-patientDID rate limits are never triggered regardless of level.',
         generatedAt: new Date().toISOString(),

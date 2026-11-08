@@ -26,10 +26,8 @@ export interface GrantPermissionInput {
   // self-reported string.
   actorRole?: string;
   roleProofRecordId?: string;
-  // Which agent's /proof-data/:id endpoint to check roleProofRecordId
-  // against. Falls back to VERIFIER_AGENT_BASE_URL if not provided —
-  // different roles may be verified by different agents.
-  verifierAgentBaseUrl?: string;
+  // Checked against VERIFIER_AGENT_BASE_URL from this DWN's own config only,
+  // never a caller-supplied address (2026-11-07).
 }
 
 export interface RevokePermissionInput {
@@ -114,7 +112,6 @@ export class PermissionsInterface {
       const verified = await verifyActorRoleProof({
         proofRecordId: input.roleProofRecordId,
         expectedRole: input.actorRole,
-        verifierAgentBaseUrl: input.verifierAgentBaseUrl,
       });
       if (!verified) {
         throw new Error('Role proof verification failed: proof is not verified, or its revealed role does not match actorRole');
@@ -160,6 +157,18 @@ export class PermissionsInterface {
     await LevelDBAdapter.put(PERMISSION_KEY_PREFIX + permissionId, JSON.stringify(permission));
 
     return permission;
+  }
+
+  // Single grant by ID, or null if missing/corrupted.
+  static async getPermission(permissionId: string): Promise<Permission | null> {
+    if (typeof permissionId !== 'string' || !permissionId) return null;
+    const raw = await LevelDBAdapter.get(PERMISSION_KEY_PREFIX + permissionId);
+    if (raw === null) return null;
+    try {
+      return JSON.parse(raw) as Permission;
+    } catch {
+      return null;
+    }
   }
 
   static async revokePermission(input: RevokePermissionInput): Promise<RevokePermissionResult> {

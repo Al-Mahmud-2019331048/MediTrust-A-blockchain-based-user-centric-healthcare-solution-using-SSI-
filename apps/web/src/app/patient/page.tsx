@@ -1,31 +1,36 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import {
   queryRecords, shareRecord, revokeAccess, initiateSelfCustody, restoreSelfCustody,
   getMekStatus, restoreData, getSigningKeyStatus, getNotifications,
+  createSession, checkSession, logout, SESSION_EXPIRED_EVENT,
   DWNRecordSummary, SelfCustodyShare, DwnNotification,
 } from '@/services/dwnService';
+import { requestLoginProof } from '@/services/apiService';
+import ConnectionSetup from '@/components/ConnectionSetup';
+import { useProofVerification } from '@/hooks/useProofVerification';
 import { RecordCard } from '@/components/RecordCard';
 
+// Since 2026-11-07 the dashboard no longer opens an account from a typed-in
+// ID: the patient logs in with their wallet (a proof of their Government
+// identity credential revealing only their account ID), and the DWN issues a
+// session token for that account. See dwn/patient-node/src/auth/session.ts.
 export default function PatientDashboard() {
-  const [patientDID, setPatientDID] = useState('');
   const [activeDID, setActiveDID] = useState<string | null>(null);
+  const [checking, setChecking] = useState(true);
+  const [expiredNotice, setExpiredNotice] = useState(false);
 
   useEffect(() => {
-    const saved = localStorage.getItem('meditrust-patient-did');
-    if (saved) {
-      setPatientDID(saved);
-      setActiveDID(saved);
-    }
+    checkSession().then((session) => {
+      if (session) setActiveDID(session.patientDID);
+      setChecking(false);
+    });
+    const onExpired = () => { setActiveDID(null); setExpiredNotice(true); };
+    window.addEventListener(SESSION_EXPIRED_EVENT, onExpired);
+    return () => window.removeEventListener(SESSION_EXPIRED_EVENT, onExpired);
   }, []);
-
-  const connect = () => {
-    if (!patientDID.trim()) return;
-    localStorage.setItem('meditrust-patient-did', patientDID.trim());
-    setActiveDID(patientDID.trim());
-  };
 
   return (
     <main className="mx-auto min-h-screen max-w-4xl px-6 py-12">
@@ -38,37 +43,20 @@ export default function PatientDashboard() {
         </p>
       </div>
 
-      {!activeDID ? (
-        <div className="rounded-2xl bg-white p-8 shadow-sm ring-1 ring-gray-200">
-          <p className="mb-3 text-sm text-gray-500">
-            Enter your Patient Account ID — the identifier shown when your identity credential was first issued at
-            the Government Portal. It stays the same across every visit and every connection, unlike a raw
-            connection ID.
-          </p>
-          <div className="flex gap-2">
-            <input
-              value={patientDID}
-              onChange={(e) => setPatientDID(e.target.value)}
-              placeholder="Patient Account ID"
-              className="flex-1 rounded-lg border border-gray-200 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-violet-400"
-            />
-            <button
-              onClick={connect}
-              className="rounded-lg bg-violet-600 px-5 py-2 text-sm font-medium text-white transition-colors duration-200 hover:bg-violet-700"
-            >
-              Open
-            </button>
-          </div>
-        </div>
+      {checking ? null : !activeDID ? (
+        <WalletLogin
+          expiredNotice={expiredNotice}
+          onLoggedIn={(did) => { setExpiredNotice(false); setActiveDID(did); }}
+        />
       ) : (
         <div className="animate-fadeIn space-y-8">
           <div className="flex items-center justify-between rounded-lg bg-violet-50 px-4 py-3 text-sm text-violet-700">
             <BlurredDID did={activeDID} />
             <button
-              onClick={() => { localStorage.removeItem('meditrust-patient-did'); setActiveDID(null); }}
+              onClick={async () => { await logout(); setActiveDID(null); }}
               className="text-xs text-violet-500 underline hover:text-violet-700"
             >
-              switch
+              log out
             </button>
           </div>
 
@@ -79,6 +67,83 @@ export default function PatientDashboard() {
         </div>
       )}
     </main>
+  );
+}
+
+// Step 1: connect the wallet to the Government agent (QR). Step 2: the
+// Government agent sends a login proof request; the patient approves it.
+// Step 3: the proof's ID is exchanged at the DWN for a session.
+function WalletLogin({ expiredNotice, onLoggedIn }: { expiredNotice: boolean; onLoggedIn: (did: string) => void }) {
+  const [connectionId, setConnectionId] = useState<string | null>(null);
+
+  return (
+    <div className="space-y-4">
+      {expiredNotice && (
+        <p className="rounded-lg bg-amber-50 px-4 py-3 text-sm text-amber-700">
+          Your session ended. Log in with your wallet again to continue.
+        </p>
+      )}
+      {!connectionId ? (
+        <div className="rounded-2xl bg-white p-6 shadow-sm ring-1 ring-gray-200">
+          <h2 className="text-lg font-semibold text-gray-900">Log in with your wallet</h2>
+          <p className="mt-1 text-sm text-gray-500">
+            Scan the QR code with your wallet. You will then be asked to share only your Patient Account ID from
+            your Government identity credential &mdash; nothing else.
+          </p>
+          <ConnectionSetup agentType="government" label="MediTrust Login" isVerifier onConnected={setConnectionId} />
+        </div>
+      ) : (
+        <LoginProofStep connectionId={connectionId} onLoggedIn={onLoggedIn} onRetry={() => setConnectionId(null)} />
+      )}
+    </div>
+  );
+}
+
+function LoginProofStep({
+  connectionId, onLoggedIn, onRetry,
+}: { connectionId: string; onLoggedIn: (did: string) => void; onRetry: () => void }) {
+  const { state, proofRecordId, error, requestVerification } = useProofVerification(
+    'government', connectionId, (cid) => requestLoginProof(cid)
+  );
+  const [loginError, setLoginError] = useState<string | null>(null);
+  const requestSent = useRef(false);
+  const sessionRequested = useRef(false);
+
+  useEffect(() => {
+    if (!requestSent.current) {
+      requestSent.current = true;
+      requestVerification('meditrust-dwn-login');
+    }
+  }, []);
+
+  useEffect(() => {
+    if (state !== 'verified' || !proofRecordId || sessionRequested.current) return;
+    sessionRequested.current = true;
+    createSession(proofRecordId)
+      .then((session) => onLoggedIn(session.patientDID))
+      .catch((err: Error) => setLoginError(err.message));
+  }, [state, proofRecordId]);
+
+  const failure = loginError ?? (state === 'failed' ? error ?? 'Login proof failed' : null);
+
+  return (
+    <div className="animate-fadeIn rounded-2xl bg-white p-6 shadow-sm ring-1 ring-gray-200">
+      <h2 className="text-lg font-semibold text-gray-900">Approve the login in your wallet</h2>
+      {!failure && (
+        <div className="mt-3 flex items-center gap-2 text-sm text-gray-500">
+          <div className="h-4 w-4 animate-spin rounded-full border-2 border-violet-500 border-t-transparent" />
+          {state === 'verified' ? 'Proof verified — opening your dashboard…' : 'Waiting for your wallet to share your Patient Account ID…'}
+        </div>
+      )}
+      {failure && (
+        <div className="mt-3 space-y-3">
+          <p className="text-sm text-red-600">Login failed: {failure}</p>
+          <button onClick={onRetry} className="rounded-lg bg-violet-600 px-4 py-2 text-sm font-medium text-white hover:bg-violet-700">
+            Try again
+          </button>
+        </div>
+      )}
+    </div>
   );
 }
 

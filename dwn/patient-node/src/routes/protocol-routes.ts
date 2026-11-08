@@ -1,3 +1,4 @@
+import crypto from 'crypto';
 import { Router, Request, Response } from 'express';
 import { ProtocolsInterface } from '../interfaces/protocols';
 import { backupWrite } from '../backup/backup-service';
@@ -25,8 +26,11 @@ function requireAdminSecret(req: Request, res: Response): boolean {
     res.status(503).json({ error: 'Protocol administration is not configured (PROTOCOL_ADMIN_SECRET is unset) — refusing to allow an unauthenticated policy change.' });
     return false;
   }
-  const provided = req.header('x-admin-secret');
-  if (provided !== configured) {
+  // Constant-time comparison (2026-11-07) so response timing doesn't leak
+  // how much of a guessed secret was right.
+  const provided = Buffer.from(req.header('x-admin-secret') ?? '', 'utf8');
+  const expected = Buffer.from(configured, 'utf8');
+  if (provided.length !== expected.length || !crypto.timingSafeEqual(provided, expected)) {
     res.status(401).json({ error: 'Missing or incorrect x-admin-secret header' });
     return false;
   }

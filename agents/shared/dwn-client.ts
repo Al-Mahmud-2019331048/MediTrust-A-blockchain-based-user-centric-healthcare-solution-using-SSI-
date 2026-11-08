@@ -1,5 +1,28 @@
 import crypto from 'crypto';
 import { DWNRecord } from './types';
+import { signRequest } from '../../crypto/encryption/src/request-signing';
+
+// Provider request signing (2026-11-07). Each agent that talks to the DWN
+// calls configureDwnSigner() once at boot with its own ledger DID + seed;
+// every request below is then signed with that key, and the DWN uses the
+// signed DID as the requester/author (see dwn/patient-node/src/auth/
+// provider-signature.ts). Without a signer, requests go out unsigned and the
+// DWN rejects writes and grant-based reads.
+let signer: { did: string; seed: string } | null = null;
+
+export function configureDwnSigner(did: string, seed: string): void {
+  if (!did || !seed) {
+    console.warn('configureDwnSigner: DID or seed missing — DWN requests will be unsigned and rejected');
+    return;
+  }
+  signer = { did, seed };
+}
+
+function signedHeaders(method: string, url: string, body: string): Record<string, string> {
+  if (!signer) return {};
+  const parsed = new URL(url);
+  return signRequest(signer.seed, signer.did, method, parsed.pathname + parsed.search, body);
+}
 
 export interface StoreRecordInput {
   patientDID: string;
@@ -39,12 +62,16 @@ export async function storeRecord(input: StoreRecordInput): Promise<DWNRecord> {
   // the DWN rejects a repeat of the same nonce as a replay (record-routes.ts).
   const nonce = crypto.randomUUID();
 
+  // authorDID is no longer sent: the DWN takes the author from the signature.
+  const { authorDID: _ignored, ...payload } = input;
+  const body = JSON.stringify({ ...payload, nonce });
+
   let response: Response;
   try {
     response = await fetch(url, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ...input, nonce }),
+      headers: { 'Content-Type': 'application/json', ...signedHeaders('POST', url, body) },
+      body,
     });
   } catch (err) {
     throw new Error(`Failed to reach DWN at ${url}: ${(err as Error).message}`);
@@ -89,7 +116,7 @@ export async function queryRecords(input: QueryRecordsInput): Promise<ReadableDW
 
   let response: Response;
   try {
-    response = await fetch(url);
+    response = await fetch(url, { headers: signedHeaders('GET', url, '') });
   } catch (err) {
     throw new Error(`Failed to reach DWN at ${url}: ${(err as Error).message}`);
   }

@@ -6,7 +6,7 @@ import path from 'path';
 import { splitMEK } from '../crypto/sss/src/key-splitter';
 import { reconstructKey } from '../crypto/sss/src/key-reconstructor';
 import { AuditService } from '../audit/src/services/audit-service';
-import { createTestPatientAgent, connectTestPatientTo, pollUntil, isReachable, randomHex, shutdownAllTestPatients, waitForNewCredentialDone, verifyTestCitizen } from './test-patient-helper';
+import { createTestPatientAgent, connectTestPatientTo, pollUntil, isReachable, randomHex, shutdownAllTestPatients, waitForNewCredentialDone, verifyTestCitizen, loginTestPatient, bearer, providerHeaders, DwnLoginSession } from './test-patient-helper';
 import { runSelectiveDisclosurePayloadAndLatency, runConcurrentCredentialWorkflows } from './selective-disclosure-experiments';
 
 const DWN_URL = (process.env.PATIENT_DWN_URL || 'http://localhost:5050').replace(/\/$/, '');
@@ -31,6 +31,78 @@ const experiments: ExperimentResult[] = [];
 const attacks: AttackResult[] = [];
 
 // ============================================================
+// DWN caller authentication (2026-11-08)
+// ============================================================
+// The DWN now checks who is calling: doctor/pharmacy requests must be
+// signed with their ledger keys, and the patient's own actions need a
+// wallet-login session. The DWN experiments below therefore (a) sign every
+// write as the doctor, (b) read as the real doctor/pharmacy providers
+// instead of made-up DIDs, and (c) use one real, logged-in benchmark
+// patient for grants/revocations. Logging in needs the government agent, so
+// those experiments report `blocked` (with the reason) if it isn't up.
+
+const BENCH_PATIENT_NID = '0000000004';
+let benchSession: DwnLoginSession | undefined;
+let benchSessionError = 'benchmark patient login not attempted';
+
+async function setupBenchmarkPatient(): Promise<void> {
+  if (!(await isReachable(GOV_URL, '/connections'))) {
+    benchSessionError = `government-agent not reachable at ${GOV_URL} — needed to log the benchmark patient in`;
+    return;
+  }
+  try {
+    const wallet = await createTestPatientAgent(4026);
+    const connection = await connectTestPatientTo(wallet, GOV_URL, 'Benchmark DWN Patient');
+    if (!connection) throw new Error('connection to government-agent did not complete');
+    const verificationId = await verifyTestCitizen(GOV_URL, connection.connectionId, BENCH_PATIENT_NID);
+    const done = new Set<string>(((await wallet.getIssuedCredentialRecords()) as any[]).filter((r) => r.state === 'done').map((r) => r.id));
+    const issueRes = await fetch(`${GOV_URL}/issue-credential`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ connectionId: connection.connectionId, verificationId }),
+      signal: AbortSignal.timeout(20000),
+    });
+    const issueBody = await issueRes.json();
+    if (!issueRes.ok || issueBody.isW3C) throw new Error(`identity credential not issued as AnonCreds: ${JSON.stringify(issueBody).slice(0, 150)}`);
+    if (!(await waitForNewCredentialDone(wallet, done, 20000))) throw new Error('identity credential never reached done');
+    benchSession = await loginTestPatient(GOV_URL, connection.connectionId, DWN_URL);
+  } catch (err) {
+    benchSessionError = `benchmark patient login failed: ${(err as Error).message}`;
+  }
+}
+
+async function signedStore(patientDID: string, recordType: string, data: unknown): Promise<Response> {
+  const body = JSON.stringify({ patientDID, recordType, protocol: 'MedicalRecord', contentType: 'application/json', data, nonce: crypto.randomUUID() });
+  return fetch(`${DWN_URL}/dwn/storeRecord`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...providerHeaders('doctor', 'POST', '/dwn/storeRecord', body) },
+    body,
+  });
+}
+
+function signedRead(provider: 'doctor' | 'pharmacy', recordId: string): Promise<Response> {
+  const readPath = `/dwn/queryRecord?recordId=${recordId}`;
+  return fetch(`${DWN_URL}${readPath}`, { headers: providerHeaders(provider, 'GET', readPath) });
+}
+
+async function patientGrant(session: DwnLoginSession, grantedToDID: string, recordType: string, purpose: string, allowedFields: string[]) {
+  const res = await fetch(`${DWN_URL}/dwn/shareRecord`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...bearer(session) },
+    body: JSON.stringify({ patientDID: session.patientDID, grantedToDID, recordType, purpose, allowedFields, nonce: crypto.randomUUID() }),
+  });
+  return res.json();
+}
+
+function patientRevoke(session: DwnLoginSession, permissionId: string): Promise<Response> {
+  return fetch(`${DWN_URL}/dwn/revokeAccess`, {
+    method: 'DELETE',
+    headers: { 'Content-Type': 'application/json', ...bearer(session) },
+    body: JSON.stringify({ permissionId }),
+  });
+}
+
+// ============================================================
 // DWN-backed experiments (fully real today, no ledger needed)
 // ============================================================
 
@@ -49,11 +121,7 @@ async function runDwnStorageOverhead(): Promise<void> {
     notes: 'Patient advised to continue current diet and exercise regimen. Follow-up in 3 months.',
   };
 
-  const res = await fetch(`${DWN_URL}/dwn/storeRecord`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ patientDID, recordType: 'medical', protocol: 'MedicalRecord', contentType: 'application/json', data, nonce: crypto.randomUUID() }),
-  });
+  const res = await signedStore(patientDID, 'medical', data);
   const record = await res.json();
 
   const plaintextBytes = record.fileSize as number;
@@ -80,23 +148,22 @@ async function runSelectiveSharingOverhead(): Promise<void> {
     return;
   }
 
-  const patientDID = crypto.randomUUID(); // must be a real UUID — DWN routes validate patientDID format (2026-07-25 fix)
-  const filteredGranteeDID = `did:bench:doctor-${randomHex(4)}`;
-  const fullGranteeDID = `did:bench:insurer-${randomHex(4)}`;
+  if (!benchSession) {
+    experiments.push({ name, metric: 'ms', status: 'blocked', detail: benchSessionError });
+    return;
+  }
+  // Grantees are the real doctor (filtered) and pharmacy (unrestricted)
+  // providers, reading with signed requests — made-up grantee DIDs can no
+  // longer read at all since 2026-11-08. Both sides pay the same signature
+  // check, so the difference still isolates field filtering.
+  const filteredGranteeDID = process.env.DOCTOR_DID!;
+  const fullGranteeDID = process.env.PHARMACY_DID!;
   const data = { diagnosis: 'flu', labResults: 'normal', prescription: 'rest and fluids', notes: 'private note' };
 
-  const storeRes = await fetch(`${DWN_URL}/dwn/storeRecord`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ patientDID, recordType: 'medical', protocol: 'MedicalRecord', contentType: 'application/json', data, nonce: crypto.randomUUID() }),
-  });
+  const storeRes = await signedStore(benchSession.patientDID, 'medical', data);
   const record = await storeRes.json();
 
-  await fetch(`${DWN_URL}/dwn/shareRecord`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ patientDID, grantedToDID: filteredGranteeDID, recordType: 'medical', purpose: 'treatment', allowedFields: ['diagnosis'], nonce: crypto.randomUUID() }),
-  });
+  const filteredGrant = await patientGrant(benchSession, filteredGranteeDID, 'medical', 'treatment', ['diagnosis']);
   // "Full" baseline is now ALSO a grant-based (non-self) read, with an
   // unrestricted grant (allowedFields: [] means unrestricted per
   // ProtocolsInterface.applyFieldFilter), not a self-read. A self-read used
@@ -105,11 +172,7 @@ async function runSelectiveSharingOverhead(): Promise<void> {
   // which silently added an unrelated LevelDB-scan cost to only one side of
   // the comparison, distorting the measured "filtering overhead". Comparing
   // two grant-based reads isolates the actual field-filtering cost again.
-  await fetch(`${DWN_URL}/dwn/shareRecord`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ patientDID, grantedToDID: fullGranteeDID, recordType: 'medical', purpose: 'audit', allowedFields: [], nonce: crypto.randomUUID() }),
-  });
+  const fullGrant = await patientGrant(benchSession, fullGranteeDID, 'medical', 'audit', []);
 
   const iterations = 20;
   const fullTimes: number[] = [];
@@ -117,12 +180,12 @@ async function runSelectiveSharingOverhead(): Promise<void> {
 
   for (let i = 0; i < iterations; i++) {
     const t0 = performance.now();
-    await fetch(`${DWN_URL}/dwn/queryRecord?recordId=${record.recordId}&requesterDID=${fullGranteeDID}`);
+    await signedRead('pharmacy', record.recordId);
     fullTimes.push(performance.now() - t0);
   }
   for (let i = 0; i < iterations; i++) {
     const t0 = performance.now();
-    await fetch(`${DWN_URL}/dwn/queryRecord?recordId=${record.recordId}&requesterDID=${filteredGranteeDID}`);
+    await signedRead('doctor', record.recordId);
     filteredTimes.push(performance.now() - t0);
   }
 
@@ -131,12 +194,16 @@ async function runSelectiveSharingOverhead(): Promise<void> {
   const avgFiltered = avg(filteredTimes);
   const overhead = avgFiltered - avgFull;
 
+  // Clean up so this patient's later experiments start with no grants.
+  await patientRevoke(benchSession, filteredGrant.permissionId);
+  await patientRevoke(benchSession, fullGrant.permissionId);
+
   experiments.push({
     name,
     metric: 'ms (filtered read avg − full read avg, both grant-based)',
     status: 'ok',
     value: Number(overhead.toFixed(3)),
-    detail: `n=${iterations} each; full grant-based read avg=${avgFull.toFixed(3)}ms, Protocol-filtered read avg=${avgFiltered.toFixed(3)}ms (both non-self, so neither pays the accessPolicy computation cost — isolates pure field-filtering overhead)`,
+    detail: `n=${iterations} each; full grant-based read avg=${avgFull.toFixed(3)}ms, Protocol-filtered read avg=${avgFiltered.toFixed(3)}ms (both non-self, signed provider reads, so both pay the same accessPolicy/signature costs — isolates pure field-filtering overhead)`,
   });
 }
 
@@ -147,38 +214,28 @@ async function runAccessRevocationTime(): Promise<void> {
     return;
   }
 
-  const patientDID = crypto.randomUUID(); // must be a real UUID — DWN routes validate patientDID format (2026-07-25 fix)
-  const grantedToDID = `did:bench:doctor-${randomHex(4)}`;
-
-  const storeRes = await fetch(`${DWN_URL}/dwn/storeRecord`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ patientDID, recordType: 'medical', protocol: 'MedicalRecord', contentType: 'application/json', data: { a: 1 }, nonce: crypto.randomUUID() }),
-  });
+  if (!benchSession) {
+    experiments.push({ name, metric: 'seconds', status: 'blocked', detail: benchSessionError });
+    return;
+  }
+  // lab_report, not medical, so the grant can't be confused with the
+  // selective-sharing experiment's grants on the same benchmark patient.
+  const storeRes = await signedStore(benchSession.patientDID, 'lab_report', { a: 1 });
   const record = await storeRes.json();
 
-  const shareRes = await fetch(`${DWN_URL}/dwn/shareRecord`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ patientDID, grantedToDID, recordType: 'medical', purpose: 'treatment', nonce: crypto.randomUUID() }),
-  });
-  const permission = await shareRes.json();
+  const permission = await patientGrant(benchSession, process.env.PHARMACY_DID!, 'lab_report', 'treatment', []);
 
-  const beforeRevoke = await fetch(`${DWN_URL}/dwn/queryRecord?recordId=${record.recordId}&requesterDID=${grantedToDID}`);
+  const beforeRevoke = await signedRead('pharmacy', record.recordId);
   if (beforeRevoke.status !== 200) {
     experiments.push({ name, metric: 'seconds', status: 'degraded', detail: 'Pre-revocation read unexpectedly denied — setup issue, not a timing result' });
     return;
   }
 
   const t0 = performance.now();
-  await fetch(`${DWN_URL}/dwn/revokeAccess`, {
-    method: 'DELETE',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ permissionId: permission.permissionId }),
-  });
+  await patientRevoke(benchSession, permission.permissionId);
   const revokeTimeSeconds = (performance.now() - t0) / 1000;
 
-  const afterRevoke = await fetch(`${DWN_URL}/dwn/queryRecord?recordId=${record.recordId}&requesterDID=${grantedToDID}`);
+  const afterRevoke = await signedRead('pharmacy', record.recordId);
 
   experiments.push({
     name,
@@ -403,14 +460,10 @@ async function attack1_readWithoutGrant(): Promise<void> {
     return;
   }
   const patientDID = crypto.randomUUID(); // must be a real UUID — DWN routes validate patientDID format (2026-07-25 fix)
-  const strangerDID = `did:bench:stranger-${randomHex(4)}`;
-  const storeRes = await fetch(`${DWN_URL}/dwn/storeRecord`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ patientDID, recordType: 'medical', protocol: 'MedicalRecord', contentType: 'application/json', data: { a: 1 }, nonce: crypto.randomUUID() }),
-  });
+  const storeRes = await signedStore(patientDID, 'medical', { a: 1 });
   const record = await storeRes.json();
-  const res = await fetch(`${DWN_URL}/dwn/queryRecord?recordId=${record.recordId}&requesterDID=${strangerDID}`);
+  // A real, signed provider that this patient never granted anything to.
+  const res = await signedRead('pharmacy', record.recordId);
   const body = await res.json();
   const passed = res.status === 403 && body.error === 'No active permission grant for this record';
   attacks.push({ name, passed, detail: `status=${res.status}, error="${body.error}"` });
@@ -504,8 +557,59 @@ async function attack5_tamperedAuditEntry(): Promise<void> {
 // Main
 // ============================================================
 
+// --- Caller-authentication attacks (added 2026-11-08) ---
+
+async function attack6_actAsPatientWithAccountIdOnly(): Promise<void> {
+  const name = '6. Act as a patient knowing only their account ID';
+  if (!benchSession) {
+    attacks.push({ name, passed: false, detail: benchSessionError });
+    return;
+  }
+  const victim = benchSession.patientDID;
+  const read = await fetch(`${DWN_URL}/dwn/queryRecord?patientDID=${victim}&requesterDID=${victim}`);
+  const grant = await fetch(`${DWN_URL}/dwn/shareRecord`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ patientDID: victim, grantedToDID: process.env.PHARMACY_DID, recordType: 'medical', purpose: 'attack', nonce: crypto.randomUUID() }),
+  });
+  const split = await fetch(`${DWN_URL}/dwn/patients/${victim}/self-custody/initiate`, { method: 'POST' });
+  const passed = read.status === 401 && grant.status === 401 && split.status === 401;
+  attacks.push({ name, passed, detail: `read=${read.status}, grant=${grant.status}, key split=${split.status} (all expected 401)` });
+}
+
+async function attack7_unsignedRecordWrite(): Promise<void> {
+  const name = '7. Write a record without a provider signature';
+  if (!(await isReachable(DWN_URL))) {
+    attacks.push({ name, passed: false, detail: `DWN not reachable at ${DWN_URL}` });
+    return;
+  }
+  const res = await fetch(`${DWN_URL}/dwn/storeRecord`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ patientDID: crypto.randomUUID(), recordType: 'medical', protocol: 'MedicalRecord', contentType: 'application/json', data: { forged: true }, authorDID: process.env.DOCTOR_DID, nonce: crypto.randomUUID() }),
+  });
+  const body = await res.json();
+  attacks.push({ name, passed: res.status === 401, detail: `status=${res.status}, error="${body.error}"` });
+}
+
+async function attack8_reuseLoginProof(): Promise<void> {
+  const name = '8. Reuse a login proof for a second session';
+  if (!benchSession) {
+    attacks.push({ name, passed: false, detail: benchSessionError });
+    return;
+  }
+  const res = await fetch(`${DWN_URL}/dwn/session`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ proofRecordId: benchSession.proofRecordId }),
+  });
+  const body = await res.json();
+  attacks.push({ name, passed: res.status === 401, detail: `status=${res.status}, error="${body.error}"` });
+}
+
 async function main() {
   console.log('Running DWN-backed experiments...');
+  await setupBenchmarkPatient();
   await runDwnStorageOverhead();
   await runSelectiveSharingOverhead();
   await runAccessRevocationTime();
@@ -531,6 +635,9 @@ async function main() {
   await attack3_mpoaBeforeThreshold();
   await attack4_mpoaExpired();
   await attack5_tamperedAuditEntry();
+  await attack6_actAsPatientWithAccountIdOnly();
+  await attack7_unsignedRecordWrite();
+  await attack8_reuseLoginProof();
 
   await shutdownAllTestPatients();
 

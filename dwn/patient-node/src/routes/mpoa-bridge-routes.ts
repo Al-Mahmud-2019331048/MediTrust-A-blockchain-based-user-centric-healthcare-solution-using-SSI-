@@ -1,3 +1,5 @@
+import { requireOwner } from '../auth/session';
+import { checkServiceToken, serviceTokenHeader, SERVICE_TOKEN_HEADER } from '../../../../crypto/encryption/src/service-token';
 import { Router, Request, Response } from 'express';
 import { getOrCreateMEK, restoreMEK, hasMEK } from '../encryption/mek-store';
 import { AuditService } from '../../../../audit/src/services/audit-service';
@@ -38,12 +40,13 @@ mpoaBridgeRouter.post('/patients/:patientDID/mpoa/initiate-split', async (req: R
   try {
     const { patientDID } = req.params;
     if (!patientDID) return res.status(400).json({ error: 'patientDID is required' });
+    if (!requireOwner(req, res, patientDID)) return;
 
     const { mek, isNewPatient } = await getOrCreateMEK(patientDID);
 
     const sssRes = await fetch(`${SSS_SERVICE_URL}/sss/recovery/initiate-with-split`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...serviceTokenHeader() },
       body: JSON.stringify({ mek: mek.toString('hex'), patientDid: patientDID }),
     });
     if (!sssRes.ok) {
@@ -58,6 +61,37 @@ mpoaBridgeRouter.post('/patients/:patientDID/mpoa/initiate-split', async (req: R
   }
 });
 
+// POST /dwn/patients/:patientDID/mpoa/register-approver
+// Body: { approverRole: 'patient' | 'hospital' | 'guardian', publicKeyPem }
+// Added 2026-11-08. Registers the public key an MPOA approver will sign
+// approvals with. Previously anyone could call the SSS service's
+// /sss/mpoa/register-key directly and replace a patient's approver keys with
+// their own, then sign all 3 approvals themselves. Now only the logged-in
+// patient can register keys (here), and the SSS service accepts
+// registrations only from the DWN (service token).
+mpoaBridgeRouter.post('/patients/:patientDID/mpoa/register-approver', async (req: Request, res: Response) => {
+  try {
+    const { patientDID } = req.params;
+    if (!isValidPatientDID(patientDID)) return res.status(400).json({ error: 'patientDID must be a valid UUID' });
+    if (!requireOwner(req, res, patientDID)) return;
+
+    const { approverRole, publicKeyPem } = req.body ?? {};
+    if (typeof approverRole !== 'string' || typeof publicKeyPem !== 'string' || !approverRole || !publicKeyPem) {
+      return res.status(400).json({ error: 'approverRole and publicKeyPem are required strings' });
+    }
+    const sssRes = await fetch(`${SSS_SERVICE_URL}/sss/mpoa/register-key`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...serviceTokenHeader() },
+      body: JSON.stringify({ patientDid: patientDID, approverRole, publicKeyPem }),
+      signal: AbortSignal.timeout(10_000),
+    });
+    const body = await sssRes.json().catch(() => ({}));
+    res.status(sssRes.status).json(body);
+  } catch (err: unknown) {
+    res.status(502).json({ error: `SSS service unreachable: ${(err as Error).message}` });
+  }
+});
+
 // POST /dwn/patients/:patientDID/mpoa/complete-restore
 // Body: { mek: string } — the hex-encoded MEK already reconstructed via
 // crypto/sss's existing POST /sss/recovery/:requestId/reconstruct (which
@@ -65,8 +99,29 @@ mpoaBridgeRouter.post('/patients/:patientDID/mpoa/initiate-split', async (req: R
 // re-checked here, this route only persists the result). Writes the
 // reconstructed key back into normal-operation storage so the patient's
 // device (new or existing) resumes normal operation immediately.
+//
+// 2026-11-07: only the SSS service may call this, proven by the shared
+// SSS_SERVICE_TOKEN in the x-service-token header. Before, anyone could post
+// a key here (the backup check below only stops a WRONG key). A patient
+// session can't be used instead: MPOA exists for when the patient can't log
+// in. The SSS service forwards the key itself after its own 3-approval gate
+// (sss-routes.ts, reconstruct with restoreToDwn: true).
+function requireServiceToken(req: Request, res: Response): boolean {
+  const result = checkServiceToken(req.header(SERVICE_TOKEN_HEADER));
+  if (result === 'unset') {
+    res.status(503).json({ error: 'MPOA restore is not configured (SSS_SERVICE_TOKEN is unset)' });
+    return false;
+  }
+  if (result !== 'ok') {
+    res.status(401).json({ error: 'Only the SSS service may complete an MPOA restore' });
+    return false;
+  }
+  return true;
+}
+
 mpoaBridgeRouter.post('/patients/:patientDID/mpoa/complete-restore', async (req: Request, res: Response) => {
   try {
+    if (!requireServiceToken(req, res)) return;
     const { patientDID } = req.params;
     if (!patientDID) return res.status(400).json({ error: 'patientDID is required' });
 
