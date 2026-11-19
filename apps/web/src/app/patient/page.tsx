@@ -5,10 +5,9 @@ import Link from 'next/link';
 import {
   queryRecords, shareRecord, revokeAccess, initiateSelfCustody, restoreSelfCustody,
   getMekStatus, restoreData, getSigningKeyStatus, getNotifications,
-  createSession, checkSession, logout, SESSION_EXPIRED_EVENT,
+  createSession, startLogin, checkSession, logout, SESSION_EXPIRED_EVENT,
   DWNRecordSummary, SelfCustodyShare, DwnNotification,
 } from '@/services/dwnService';
-import { requestLoginProof } from '@/services/apiService';
 import ConnectionSetup from '@/components/ConnectionSetup';
 import { useProofVerification } from '@/hooks/useProofVerification';
 import { RecordCard } from '@/components/RecordCard';
@@ -103,7 +102,7 @@ function LoginProofStep({
   connectionId, onLoggedIn, onRetry,
 }: { connectionId: string; onLoggedIn: (did: string) => void; onRetry: () => void }) {
   const { state, proofRecordId, error, requestVerification } = useProofVerification(
-    'government', connectionId, (cid) => requestLoginProof(cid)
+    'government', connectionId, (cid) => startLogin(cid)
   );
   const [loginError, setLoginError] = useState<string | null>(null);
   const requestSent = useRef(false);

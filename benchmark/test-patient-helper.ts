@@ -12,9 +12,9 @@ export function randomHex(bytes: number): string {
   return require('crypto').randomBytes(bytes).toString('hex');
 }
 
-export async function isReachable(url: string, path = '/health', timeoutMs = 3000): Promise<boolean> {
+export async function isReachable(url: string, path = '/health', timeoutMs = 3000, headers: Record<string, string> = {}): Promise<boolean> {
   try {
-    const res = await fetch(`${url}${path}`, { signal: AbortSignal.timeout(timeoutMs) });
+    const res = await fetch(`${url}${path}`, { headers, signal: AbortSignal.timeout(timeoutMs) });
     return res.ok;
   } catch {
     return false;
@@ -107,11 +107,12 @@ export async function connectTestPatientTo(
   testPatient: BaseAgent,
   agentBaseUrl: string,
   label = 'Test Patient',
-  timeoutMs = 15000
+  timeoutMs = 15000,
+  headers: Record<string, string> = {}
 ): Promise<TestConnection | undefined> {
   const invRes = await fetch(`${agentBaseUrl}/create-invitation`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...headers },
     body: JSON.stringify({ label, alias: `${label.toLowerCase().replace(/\s+/g, '-')}-${Date.now()}` }),
   });
   const invitation = await invRes.json();
@@ -120,7 +121,7 @@ export async function connectTestPatientTo(
   await testPatient.acceptInvitation({ invitationUrl: invitation.invitationUrl, label });
 
   const connection = await pollUntil(async () => {
-    const res = await fetch(`${agentBaseUrl}/connections?outOfBandId=${outOfBandId}`);
+    const res = await fetch(`${agentBaseUrl}/connections?outOfBandId=${outOfBandId}`, { headers });
     const conns: any[] = await res.json();
     return conns.find((c) => c.state === 'completed' || c.state === 'response-sent');
   }, timeoutMs);
@@ -247,20 +248,21 @@ export interface DwnLoginSession {
 }
 
 // Logs the test patient in to the DWN the same way the Patient Dashboard
-// does: the Government agent sends a login proof request over an existing
-// connection, the test wallet answers it (auto-accept is wired in
-// createTestPatientAgent), and the proof's ID is exchanged at the DWN for a
-// session token. The wallet must already hold a Government identity
-// credential.
+// does: the DWN starts the login (it asks the Government agent to send a
+// login proof request over an existing connection and returns a one-time
+// login secret), the test wallet answers it (auto-accept is wired in
+// createTestPatientAgent), and the proof's ID plus the secret are exchanged
+// at the DWN for a session token. The wallet must already hold a Government
+// identity credential.
 export async function loginTestPatient(govUrl: string, connectionId: string, dwnUrl: string, timeoutMs = 30000): Promise<DwnLoginSession> {
-  const requestRes = await fetch(`${govUrl}/request-login-proof`, {
+  const requestRes = await fetch(`${dwnUrl}/dwn/login/start`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ connectionId }),
-    signal: AbortSignal.timeout(10000),
+    signal: AbortSignal.timeout(15000),
   });
   const requestBody = await requestRes.json();
-  if (!requestRes.ok) throw new Error(`Login proof request failed: ${requestBody.error}`);
+  if (!requestRes.ok) throw new Error(`Login could not start: ${requestBody.error}`);
 
   const verified = await pollUntil(async () => {
     const statusRes = await fetch(`${govUrl}/proof-status/${requestBody.proofRecordId}`);
@@ -272,7 +274,7 @@ export async function loginTestPatient(govUrl: string, connectionId: string, dwn
   const sessionRes = await fetch(`${dwnUrl}/dwn/session`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ proofRecordId: requestBody.proofRecordId }),
+    body: JSON.stringify({ proofRecordId: requestBody.proofRecordId, loginSecret: requestBody.loginSecret }),
   });
   const session = await sessionRes.json();
   if (!sessionRes.ok) throw new Error(`DWN session failed: ${session.error}`);
@@ -281,6 +283,13 @@ export async function loginTestPatient(govUrl: string, connectionId: string, dwn
 
 export function bearer(session: DwnLoginSession): Record<string, string> {
   return { Authorization: `Bearer ${session.token}` };
+}
+
+// Staff access code for calling the doctor or pharmacy agent's API directly
+// (2026-11-19, see agents/shared/staff-auth.ts), from .env.
+export function staffHeaders(agent: 'doctor' | 'pharmacy'): Record<string, string> {
+  const token = agent === 'doctor' ? process.env.DOCTOR_STAFF_TOKEN : process.env.PHARMACY_STAFF_TOKEN;
+  return token ? { 'x-staff-token': token } : {};
 }
 
 // Signs a DWN request as one of the real, trusted providers (keys from .env),

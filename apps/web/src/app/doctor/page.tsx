@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import ConnectionSetup from '@/components/ConnectionSetup';
+import StaffGate from '@/components/StaffGate';
 import { issueMedicalCredential, issuePrescription, readPatientRecords, getAgentStatus, DocumentAttachment } from '@/services/apiService';
 import { useProofVerification } from '@/hooks/useProofVerification';
 import { RecordCard, RECORD_TYPE_LABELS } from '@/components/RecordCard';
@@ -233,7 +234,17 @@ function PatientRecordsPanel({ patientDID }: { patientDID: string }) {
   );
 }
 
-export default function DoctorPortal() {
+// Staff enter the doctor agent's access code before the portal opens
+// (2026-11-19); the portal itself is unchanged.
+export default function DoctorPortalPage() {
+  return (
+    <StaffGate agentType="doctor" portalName="Doctor Portal">
+      <DoctorPortal />
+    </StaffGate>
+  );
+}
+
+function DoctorPortal() {
   const [connectionId, setConnectionId] = useState<string | null>(null);
   const [patientIdentity, setPatientIdentity] = useState<PatientIdentity | null>(null);
   const [viewMode, setViewMode] = useState<'issue' | 'records'>('issue');

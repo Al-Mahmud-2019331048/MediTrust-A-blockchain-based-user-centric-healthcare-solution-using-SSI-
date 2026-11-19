@@ -12,9 +12,57 @@ const AGENT_ENDPOINTS: Record<AgentType, string> = {
   'healthcare-authority': process.env.NEXT_PUBLIC_HEALTHCARE_AUTHORITY_URL || 'http://localhost:4006',
 };
 
+// Staff access code for the doctor and pharmacy agents (2026-11-19) — see
+// agents/shared/staff-auth.ts. Staff enter it once per browser tab
+// (components/StaffGate.tsx); it is then sent with every request to those two
+// agents. Requests to the other agents are unchanged.
+export type StaffAgentType = 'doctor' | 'pharmacist';
+const STAFF_TOKEN_HEADER = 'x-staff-token';
+const STAFF_STORAGE_PREFIX = 'meditrust-staff-token:';
+
+function isStaffAgent(agentType: AgentType): agentType is StaffAgentType {
+  return agentType === 'doctor' || agentType === 'pharmacist';
+}
+
+export function getStaffToken(agentType: StaffAgentType): string | null {
+  try {
+    return sessionStorage.getItem(STAFF_STORAGE_PREFIX + agentType);
+  } catch {
+    return null;
+  }
+}
+
+export function setStaffToken(agentType: StaffAgentType, token: string | null): void {
+  try {
+    if (token) sessionStorage.setItem(STAFF_STORAGE_PREFIX + agentType, token);
+    else sessionStorage.removeItem(STAFF_STORAGE_PREFIX + agentType);
+  } catch {
+    // Storage unavailable — the code then has to be entered again.
+  }
+}
+
+// Request headers for an agent, plus the staff access code when that agent
+// needs one.
+export function agentHeaders(agentType: AgentType, headers: Record<string, string> = {}): Record<string, string> {
+  if (!isStaffAgent(agentType)) return headers;
+  const token = getStaffToken(agentType);
+  return token ? { ...headers, [STAFF_TOKEN_HEADER]: token } : headers;
+}
+
+// Whether the agent accepts the stored staff access code.
+export async function checkStaffAccess(agentType: StaffAgentType): Promise<{ ok: boolean; error?: string }> {
+  try {
+    const response = await fetch(`${AGENT_ENDPOINTS[agentType]}/staff-check`, { headers: agentHeaders(agentType) });
+    if (response.ok) return { ok: true };
+    return { ok: false, error: await errorMessage(response) };
+  } catch {
+    return { ok: false, error: `The ${agentType} agent is not reachable` };
+  }
+}
+
 async function checkAgentAvailability(agentType: AgentType): Promise<boolean> {
   try {
-    const response = await fetch(`${AGENT_ENDPOINTS[agentType]}/connections`);
+    const response = await fetch(`${AGENT_ENDPOINTS[agentType]}/connections`, { headers: agentHeaders(agentType) });
     return response.ok;
   } catch {
     return false;
@@ -27,7 +75,7 @@ export async function createInvitation(agentType: AgentType, label: string, alia
 
   const response = await fetch(`${AGENT_ENDPOINTS[agentType]}/create-invitation`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: agentHeaders(agentType, { 'Content-Type': 'application/json' }),
     body: JSON.stringify({ label, alias }),
     mode: 'cors',
   });
@@ -44,7 +92,7 @@ export async function getConnections(agentType: AgentType, connectionId?: string
     ? `${AGENT_ENDPOINTS[agentType]}/connections?connectionId=${connectionId}`
     : `${AGENT_ENDPOINTS[agentType]}/connections`;
 
-  const response = await fetch(url);
+  const response = await fetch(url, { headers: agentHeaders(agentType) });
   if (!response.ok) return [];
   return response.json();
 }
@@ -159,7 +207,7 @@ export async function issueMedicalCredential(connectionId: string, doc: {
 }, attachment?: DocumentAttachment, identity?: VerifiedPatientIdentity) {
   const response = await fetch(`${AGENT_ENDPOINTS.doctor}/issue-medical-credential`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: agentHeaders('doctor', { 'Content-Type': 'application/json' }),
     body: JSON.stringify({ connectionId, ...doc, issuedAt: new Date().toISOString(), attachment, ...identity }),
   });
   if (!response.ok) throw new Error(`Server responded with ${response.status}: ${await response.text()}`);
@@ -177,7 +225,7 @@ export async function readPatientRecords(
 ): Promise<DWNRecordSummary[]> {
   const response = await fetch(`${AGENT_ENDPOINTS.doctor}/read-patient-records`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: agentHeaders('doctor', { 'Content-Type': 'application/json' }),
     body: JSON.stringify({ patientDID, recordType }),
   });
   if (!response.ok) throw new Error(`Server responded with ${response.status}: ${await response.text()}`);
@@ -190,7 +238,7 @@ export async function issuePrescription(connectionId: string, doc: {
 }, attachment?: DocumentAttachment, identity?: VerifiedPatientIdentity) {
   const response = await fetch(`${AGENT_ENDPOINTS.doctor}/issue-prescription`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: agentHeaders('doctor', { 'Content-Type': 'application/json' }),
     body: JSON.stringify({ connectionId, ...doc, attachment, ...identity }),
   });
   if (!response.ok) throw new Error(`Server responded with ${response.status}: ${await response.text()}`);
@@ -200,7 +248,7 @@ export async function issuePrescription(connectionId: string, doc: {
 export async function sendProofRequest(agentType: AgentType, connectionId: string, proofRequestlabel: string) {
   const response = await fetch(`${AGENT_ENDPOINTS[agentType]}/send-proof-request`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: agentHeaders(agentType, { 'Content-Type': 'application/json' }),
     body: JSON.stringify({ connectionId, proofRequestlabel, version: '1.0' }),
   });
   // Without this check, a real server error (e.g. connection not yet fully
@@ -211,27 +259,13 @@ export async function sendProofRequest(agentType: AgentType, connectionId: strin
   return response.json();
 }
 
-// Patient Dashboard wallet login (2026-11-07): asks the Government agent to
-// send the wallet a minimal proof request revealing only patientAccountId.
-// Normalized to { id, state } for useProofVerification's requestFn.
-export async function requestLoginProof(connectionId: string): Promise<{ id: string; state: string }> {
-  const response = await fetch(`${AGENT_ENDPOINTS.government}/request-login-proof`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ connectionId }),
-  });
-  if (!response.ok) throw new Error(`Server responded with ${response.status}: ${await response.text()}`);
-  const body = await response.json();
-  return { id: body.proofRecordId, state: body.state };
-}
-
 // pharmacy-agent's /verify-patient-identity and /verify-prescription both
 // return { success, proofRecordId, state } — normalized here to { id, state }
 // so both can be passed as useProofVerification's requestFn override.
 export async function verifyPatientIdentity(connectionId: string): Promise<{ id: string; state: string }> {
   const response = await fetch(`${AGENT_ENDPOINTS.pharmacist}/verify-patient-identity`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: agentHeaders('pharmacist', { 'Content-Type': 'application/json' }),
     body: JSON.stringify({ connectionId }),
   });
   if (!response.ok) throw new Error(`Server responded with ${response.status}: ${await response.text()}`);
@@ -242,7 +276,7 @@ export async function verifyPatientIdentity(connectionId: string): Promise<{ id:
 export async function verifyPrescription(connectionId: string): Promise<{ id: string; state: string }> {
   const response = await fetch(`${AGENT_ENDPOINTS.pharmacist}/verify-prescription`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: agentHeaders('pharmacist', { 'Content-Type': 'application/json' }),
     body: JSON.stringify({ connectionId }),
   });
   if (!response.ok) throw new Error(`Server responded with ${response.status}: ${await response.text()}`);
@@ -266,7 +300,7 @@ export interface DWNPrescriptionRecord {
 export async function readPrescriptionFromDWN(patientDID: string): Promise<DWNPrescriptionRecord[]> {
   const response = await fetch(`${AGENT_ENDPOINTS.pharmacist}/read-prescription`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: agentHeaders('pharmacist', { 'Content-Type': 'application/json' }),
     body: JSON.stringify({ patientDID }),
   });
   if (!response.ok) throw new Error(`Server responded with ${response.status}: ${await response.text()}`);
@@ -277,7 +311,7 @@ export async function readPrescriptionFromDWN(patientDID: string): Promise<DWNPr
 export async function sendMessage(agentType: AgentType, connectionId: string, message: string) {
   const response = await fetch(`${AGENT_ENDPOINTS[agentType]}/send-message`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: agentHeaders(agentType, { 'Content-Type': 'application/json' }),
     body: JSON.stringify({ connectionId, message }),
   });
   if (!response.ok) throw new Error(`Server responded with ${response.status}: ${await response.text()}`);
@@ -292,7 +326,7 @@ export async function getProofRecords(agentType: AgentType, proofRecordId?: stri
     ? `${AGENT_ENDPOINTS[agentType]}/proof-records?proofRecordId=${proofRecordId}`
     : `${AGENT_ENDPOINTS[agentType]}/proof-records`;
 
-  const response = await fetch(url);
+  const response = await fetch(url, { headers: agentHeaders(agentType) });
   if (!response.ok) return [];
   return response.json();
 }
@@ -301,7 +335,7 @@ export async function getProofData(agentType: AgentType, proofRecordId: string) 
   const isAvailable = await checkAgentAvailability(agentType);
   if (!isAvailable) return null;
 
-  const response = await fetch(`${AGENT_ENDPOINTS[agentType]}/proof-data/${proofRecordId}`);
+  const response = await fetch(`${AGENT_ENDPOINTS[agentType]}/proof-data/${proofRecordId}`, { headers: agentHeaders(agentType) });
   if (!response.ok) return null;
 
   // The server (verifier-routes.ts) already computes and includes a real
@@ -326,7 +360,7 @@ export async function getProofStatus(agentType: AgentType, proofRecordId: string
   const isAvailable = await checkAgentAvailability(agentType);
   if (!isAvailable) return { isVerified: false, state: 'unknown', error: 'Agent not available' };
 
-  const response = await fetch(`${AGENT_ENDPOINTS[agentType]}/proof-status/${proofRecordId}`);
+  const response = await fetch(`${AGENT_ENDPOINTS[agentType]}/proof-status/${proofRecordId}`, { headers: agentHeaders(agentType) });
   if (!response.ok) {
     if (response.status === 404) return { isVerified: false, state: 'not_found' };
     return { isVerified: false, state: 'error' };

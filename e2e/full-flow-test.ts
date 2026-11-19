@@ -4,7 +4,7 @@ dotenv.config();
 import fs from 'fs';
 import path from 'path';
 import { AuditService } from '../audit/src/services/audit-service';
-import { createTestPatientAgent, connectTestPatientTo, pollUntil, isReachable, randomHex, shutdownAllTestPatients, verifyTestCitizen, loginTestPatient, bearer, providerHeaders, DwnLoginSession } from '../benchmark/test-patient-helper';
+import { createTestPatientAgent, connectTestPatientTo, pollUntil, isReachable, randomHex, shutdownAllTestPatients, verifyTestCitizen, loginTestPatient, bearer, providerHeaders, staffHeaders, DwnLoginSession } from '../benchmark/test-patient-helper';
 import { extractRevealedAttributes } from '../agents/shared/proof-parser';
 
 const DWN_URL = (process.env.PATIENT_DWN_URL || 'http://localhost:5050').replace(/\/$/, '');
@@ -12,6 +12,8 @@ const GOV_URL = `http://localhost:${process.env.GOVERNMENT_API_PORT || '4000'}`;
 // Registry test citizen used for the identity-verification step before issuance.
 const E2E_TEST_NID = '0000000001';
 const DOCTOR_URL = `http://localhost:${process.env.DOCTOR_API_PORT || '4002'}`;
+// The doctor agent's API needs the staff access code (DOCTOR_STAFF_TOKEN).
+const DOCTOR_STAFF = staffHeaders('doctor');
 
 interface StepResult {
   step: string;
@@ -33,7 +35,7 @@ async function main() {
 
   const dwnUp = await isReachable(DWN_URL);
   const govUp = await isReachable(GOV_URL, '/connections');
-  const doctorUp = await isReachable(DOCTOR_URL, '/connections');
+  const doctorUp = await isReachable(DOCTOR_URL, '/connections', 3000, DOCTOR_STAFF);
 
   if (!dwnUp) {
     steps.push({ step: 'ALL REMAINING STEPS', status: 'blocked', detail: `DWN not reachable at ${DWN_URL} — cannot continue` });
@@ -98,7 +100,7 @@ async function main() {
     steps.push({ step: '3. Doctor verifies + issues', status: 'blocked', detail: `doctor-agent not reachable at ${DOCTOR_URL}` });
   } else {
     if (!testPatient) testPatient = await createTestPatientAgent(4021);
-    const doctorConnection = await connectTestPatientTo(testPatient, DOCTOR_URL, 'E2E Test Patient');
+    const doctorConnection = await connectTestPatientTo(testPatient, DOCTOR_URL, 'E2E Test Patient', 15000, DOCTOR_STAFF);
     if (!doctorConnection) {
       steps.push({ step: '3. Doctor verifies + issues', status: 'blocked', detail: 'Connection to doctor-agent did not complete within 15s' });
     } else {
@@ -119,19 +121,19 @@ async function main() {
       if (credentialReady) {
         const proofRes = await fetch(`${DOCTOR_URL}/send-proof-request`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', ...DOCTOR_STAFF },
           body: JSON.stringify({ proofRequestlabel: 'e2e-identity-verification', connectionId: doctorConnectionId }),
         });
         const proofBody = await proofRes.json();
         if (proofBody?.id) {
           identityProofRecordId = proofBody.id;
           const verified = await pollUntil(async () => {
-            const statusRes = await fetch(`${DOCTOR_URL}/proof-status/${proofBody.id}`);
+            const statusRes = await fetch(`${DOCTOR_URL}/proof-status/${proofBody.id}`, { headers: DOCTOR_STAFF });
             const status = await statusRes.json();
             return status.isVerified ? status : undefined;
           }, 20000, 500);
           if (verified) {
-            const proofDataRes = await fetch(`${DOCTOR_URL}/proof-data/${proofBody.id}`);
+            const proofDataRes = await fetch(`${DOCTOR_URL}/proof-data/${proofBody.id}`, { headers: DOCTOR_STAFF });
             const proofData = await proofDataRes.json();
             verifiedPatientAccountId = extractRevealedAttributes(proofData).revealedAttributes.patientAccountId;
           }
@@ -156,7 +158,7 @@ async function main() {
       } else {
         const issueRes = await fetch(`${DOCTOR_URL}/issue-medical-credential`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', ...DOCTOR_STAFF },
           body: JSON.stringify({
             connectionId: doctorConnectionId,
             ...originalDocumentData,
@@ -287,13 +289,13 @@ async function main() {
     try {
       const proofRes = await fetch(`${DOCTOR_URL}/send-proof-request`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...DOCTOR_STAFF },
         body: JSON.stringify({ proofRequestlabel: 'e2e-verification-7a', connectionId: doctorConnectionId }),
       });
       const proofBody = await proofRes.json();
       const verified = proofBody?.id
         ? await pollUntil(async () => {
-            const statusRes = await fetch(`${DOCTOR_URL}/proof-status/${proofBody.id}`);
+            const statusRes = await fetch(`${DOCTOR_URL}/proof-status/${proofBody.id}`, { headers: DOCTOR_STAFF });
             const status = await statusRes.json();
             return status.isVerified ? status : undefined;
           }, 20000, 500)

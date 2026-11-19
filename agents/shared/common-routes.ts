@@ -163,9 +163,16 @@ export function registerCommonRoutes(
     }
   });
 
-  // GET /proof-records
+  // GET /proof-records?proofRecordId=...
+  // A proofRecordId is required (2026-11-19). Without one this used to list
+  // every proof record on the agent to any caller, which exposed the IDs of
+  // other people's proofs (e.g. patients' fresh dashboard logins) — and with
+  // an ID, /proof-data returns the revealed attributes.
   app.get("/proof-records", async (req: Request, res: Response) => {
     const { proofRecordId } = req.query;
+    if (!proofRecordId || typeof proofRecordId !== "string") {
+      return res.status(400).send({ error: "proofRecordId is required" });
+    }
     try {
       const result = await agent.getProofRecords(proofRecordId as string);
       res.status(200).send(result);

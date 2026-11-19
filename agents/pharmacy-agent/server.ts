@@ -9,6 +9,7 @@ import { createProofStatusCache } from '../shared/cache-utils';
 import { registerCommonRoutes, AgentConfig } from '../shared/common-routes';
 import { registerVerifierRoutes } from '../shared/verifier-routes';
 import { registerDebugRoutes } from '../shared/debug-routes';
+import { registerStaffAccess } from '../shared/staff-auth';
 import { registerPharmacyRoutes } from './src/routes/pharmacy-routes';
 
 const apiPort = parseInt(process.env.PHARMACY_API_PORT || '4004');
@@ -23,6 +24,8 @@ const agentSeed = process.env.PHARMACY_SEED || '';
 const app = express();
 app.use(cors());
 app.use(express.json());
+// Every API route below needs the staff access code (2026-11-19).
+registerStaffAccess(app, 'PHARMACY_STAFF_TOKEN');
 
 const agent = new BaseAgent({ port: agentPort, label: agentLabel, publicEndpoint: agentPublicEndpoint });
 

@@ -9,33 +9,52 @@ import { isValidPatientDID } from '../utils/validation';
 // patient: read everything, grant/revoke access, split or restore their key.
 // Now the patient proves who they are with the Government-issued identity
 // credential already in their wallet:
-//   1. The dashboard asks the Government agent to send the wallet a login
-//      proof request (agents/government-agent/src/routes/login-routes.ts).
+//   1. The dashboard calls POST /dwn/login/start; the DWN asks the Government
+//      agent to send the wallet a login proof request
+//      (agents/government-agent/src/routes/login-routes.ts) and returns the
+//      proofRecordId together with a one-time login secret.
 //   2. The patient approves it in their wallet.
-//   3. The dashboard POSTs the proofRecordId to /dwn/session.
+//   3. The dashboard POSTs the proofRecordId and the login secret to
+//      /dwn/session.
 //   4. The DWN fetches the proof result ITSELF from the Government agent at
 //      the address in its own config (never from the request), checks it,
 //      and issues a random session token bound to the revealed account ID.
 // Owner-only routes then require `Authorization: Bearer <token>` for that
 // same account (requireOwner below).
 //
-// Sessions and used-proof IDs are kept in memory: a DWN restart logs
-// everyone out, which is acceptable for this PoC.
+// The login secret (2026-11-19) binds a login to the browser that started
+// it. Proof record IDs are not secret — they pass through the Government
+// agent's API — so without it, anyone who saw a fresh login proof's ID could
+// redeem it before the patient's own dashboard did and get their session.
+//
+// Sessions, pending logins and used-proof IDs are kept in memory: a DWN
+// restart logs everyone out, which is acceptable for this PoC.
 
 export const LOGIN_PROOF_NAME = 'meditrust-dwn-login'; // keep in sync with login-routes.ts
 const PROOF_MAX_AGE_MS = 5 * 60 * 1000;
 const SESSION_TTL_MS = 30 * 60 * 1000;
 const MAX_SESSIONS = 10_000;
+// A started login has to be completed within this window.
+const PENDING_LOGIN_TTL_MS = 10 * 60 * 1000;
+const MAX_PENDING_LOGINS = 10_000;
 
 interface Session {
   patientDID: string;
   expiresAt: number;
 }
 
+interface PendingLogin {
+  secretHash: string;
+  startedAt: number;
+}
+
 const sessions = new Map<string, Session>();
 // proofRecordId -> time it was used; kept slightly longer than the proof's
 // own freshness window, after which it can't be replayed anyway.
 const usedProofs = new Map<string, number>();
+// proofRecordId -> hash of the login secret handed to the browser that
+// started this login (startLogin below).
+const pendingLogins = new Map<string, PendingLogin>();
 
 function pruneExpired(now: number) {
   for (const [token, session] of sessions) {
@@ -43,6 +62,9 @@ function pruneExpired(now: number) {
   }
   for (const [proofId, usedAt] of usedProofs) {
     if (now - usedAt > 2 * PROOF_MAX_AGE_MS) usedProofs.delete(proofId);
+  }
+  for (const [proofId, pending] of pendingLogins) {
+    if (now - pending.startedAt > PENDING_LOGIN_TTL_MS) pendingLogins.delete(proofId);
   }
 }
 
@@ -77,8 +99,65 @@ function requestIsRestrictedToGovernment(request: any, governmentDID: string): b
   );
 }
 
-export async function createSessionFromLoginProof(proofRecordId: unknown): Promise<{ token: string; patientDID: string; expiresAt: string }> {
-  if (typeof proofRecordId !== 'string' || !/^[A-Za-z0-9-]{1,100}$/.test(proofRecordId)) {
+const ID_PATTERN = /^[A-Za-z0-9-]{1,100}$/;
+
+function sameHash(a: string, b: string): boolean {
+  const left = Buffer.from(a, 'hex');
+  const right = Buffer.from(b, 'hex');
+  return left.length === right.length && crypto.timingSafeEqual(left, right);
+}
+
+// Starts a wallet login for the browser that calls it: asks the Government
+// agent to send the login proof request over the given connection, and
+// returns the proof's ID with a one-time secret that only this caller gets.
+// createSessionFromLoginProof() accepts the proof only with that secret.
+export async function startLogin(connectionId: unknown): Promise<{ proofRecordId: string; state: string; loginSecret: string }> {
+  if (typeof connectionId !== 'string' || !ID_PATTERN.test(connectionId)) {
+    throw new LoginError(400, 'connectionId is required');
+  }
+  const governmentUrl = process.env.GOVERNMENT_AGENT_BASE_URL;
+  if (!governmentUrl) {
+    throw new LoginError(503, 'Wallet login is not configured (GOVERNMENT_AGENT_BASE_URL unset)');
+  }
+
+  let body: any;
+  let ok = false;
+  try {
+    const response = await fetch(`${governmentUrl.replace(/\/$/, '')}/request-login-proof`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ connectionId }),
+      signal: AbortSignal.timeout(10_000),
+    });
+    ok = response.ok;
+    body = await response.json().catch(() => ({}));
+  } catch (err) {
+    throw new LoginError(503, `Could not reach the Government agent to start the login: ${(err as Error).message}`);
+  }
+  if (!ok) {
+    throw new LoginError(502, `The Government agent could not send the login request: ${body?.error ?? 'unknown error'}`);
+  }
+  const proofRecordId = body?.proofRecordId;
+  if (typeof proofRecordId !== 'string' || !ID_PATTERN.test(proofRecordId)) {
+    throw new LoginError(502, 'The Government agent returned no valid proof record ID');
+  }
+
+  const now = Date.now();
+  pruneExpired(now);
+  if (pendingLogins.size >= MAX_PENDING_LOGINS) {
+    const oldest = pendingLogins.keys().next().value;
+    if (oldest !== undefined) pendingLogins.delete(oldest);
+  }
+  const loginSecret = crypto.randomBytes(32).toString('base64url');
+  pendingLogins.set(proofRecordId, { secretHash: hashToken(loginSecret), startedAt: now });
+  return { proofRecordId, state: typeof body?.state === 'string' ? body.state : 'request-sent', loginSecret };
+}
+
+export async function createSessionFromLoginProof(
+  proofRecordId: unknown,
+  loginSecret: unknown
+): Promise<{ token: string; patientDID: string; expiresAt: string }> {
+  if (typeof proofRecordId !== 'string' || !ID_PATTERN.test(proofRecordId)) {
     throw new LoginError(400, 'proofRecordId is required');
   }
   const governmentUrl = process.env.GOVERNMENT_AGENT_BASE_URL;
@@ -91,6 +170,12 @@ export async function createSessionFromLoginProof(proofRecordId: unknown): Promi
   pruneExpired(now);
   if (usedProofs.has(proofRecordId)) {
     throw new LoginError(401, 'This login proof has already been used');
+  }
+  // Checked before contacting the Government agent: only the browser that
+  // started this login (startLogin) holds the matching secret.
+  const pending = pendingLogins.get(proofRecordId);
+  if (!pending || typeof loginSecret !== 'string' || !sameHash(hashToken(loginSecret), pending.secretHash)) {
+    throw new LoginError(401, 'This login was not started from this browser — please start the login again');
   }
 
   let proof: any;
@@ -129,6 +214,7 @@ export async function createSessionFromLoginProof(proofRecordId: unknown): Promi
     throw new LoginError(401, 'This login proof has already been used');
   }
   usedProofs.set(proofRecordId, now);
+  pendingLogins.delete(proofRecordId);
   return issueSession(patientDID, now);
 }
 

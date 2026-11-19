@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import ConnectionSetup from '@/components/ConnectionSetup';
+import StaffGate from '@/components/StaffGate';
 import {
   verifyPatientIdentity, verifyPrescription, readPrescriptionFromDWN, getAgentStatus,
   DWNPrescriptionRecord,
@@ -219,7 +220,17 @@ function DwnPrescriptionPanel({ patientDID, pharmacyDid }: { patientDID: string;
   );
 }
 
-export default function PharmacyPortal() {
+// Staff enter the pharmacy agent's access code before the portal opens
+// (2026-11-19); the portal itself is unchanged.
+export default function PharmacyPortalPage() {
+  return (
+    <StaffGate agentType="pharmacist" portalName="Pharmacy Portal">
+      <PharmacyPortal />
+    </StaffGate>
+  );
+}
+
+function PharmacyPortal() {
   const [connectionId, setConnectionId] = useState<string | null>(null);
   const [patientIdentity, setPatientIdentity] = useState<PatientIdentity | null>(null);
   const [pharmacyDid, setPharmacyDid] = useState<string | null>(null);
