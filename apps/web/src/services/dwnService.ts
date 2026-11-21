@@ -80,14 +80,36 @@ function authHeaders(): Record<string, string> {
   return session ? { Authorization: `Bearer ${session.token}` } : {};
 }
 
+// proofRecordId -> one-time login secret from startLogin(). Kept only in this
+// tab's memory: the DWN accepts a login proof only together with the secret
+// it gave to the browser that started the login (2026-11-19).
+const loginSecrets = new Map<string, string>();
+
+// Wallet login, step 1: the DWN asks the Government agent to send the wallet
+// a minimal proof request (revealing only patientAccountId) and returns a
+// one-time secret for this browser. Normalized to { id, state } for
+// useProofVerification's requestFn.
+export async function startLogin(connectionId: string): Promise<{ id: string; state: string }> {
+  const response = await fetch(`${DWN_URL}/dwn/login/start`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ connectionId }),
+  });
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(body.error || `Login could not start (${response.status})`);
+  loginSecrets.set(body.proofRecordId, body.loginSecret);
+  return { id: body.proofRecordId, state: body.state };
+}
+
 export async function createSession(proofRecordId: string): Promise<DwnSession> {
   const response = await fetch(`${DWN_URL}/dwn/session`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ proofRecordId }),
+    body: JSON.stringify({ proofRecordId, loginSecret: loginSecrets.get(proofRecordId) }),
   });
   const body = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(body.error || `Login failed (${response.status})`);
+  loginSecrets.delete(proofRecordId);
   storeSession(body as DwnSession);
   return body as DwnSession;
 }

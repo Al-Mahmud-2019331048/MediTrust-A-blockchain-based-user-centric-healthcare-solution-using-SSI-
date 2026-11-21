@@ -9,6 +9,7 @@ import { createProofStatusCache } from '../shared/cache-utils';
 import { registerCommonRoutes, AgentConfig } from '../shared/common-routes';
 import { registerVerifierRoutes } from '../shared/verifier-routes';
 import { registerDebugRoutes } from '../shared/debug-routes';
+import { registerStaffAccess } from '../shared/staff-auth';
 import { registerDoctorRoutes } from './src/routes/medical-routes';
 
 const apiPort = parseInt(process.env.DOCTOR_API_PORT || '4002');
@@ -24,6 +25,8 @@ app.use(cors());
 // on /issue-medical-credential and /issue-prescription — matches the DWN's
 // own server.ts limit.
 app.use(express.json({ limit: '25mb' }));
+// Every API route below needs the staff access code (2026-11-19).
+registerStaffAccess(app, 'DOCTOR_STAFF_TOKEN');
 
 const agent = new BaseAgent({ port: agentPort, label: agentLabel, publicEndpoint: agentPublicEndpoint });
 

@@ -1,0 +1,22 @@
+MediTrust meeting
+9:10 PM
+1. keep it simple and then explain it in the detail section
+2. ⁠add a summary at the last to summarize the paragraph
+3.> ⁠add medical power of attorney as a last point 
+4.> ⁠using uncommon symbols, need to use more common symbols, full circle for ticks, bland circle for cross held circle for partial, familiar sign for the triangle int he table
+5. ⁠mention a holistic solution.
+6. ⁠add a user journey and problem faced by the user as per bangladesh on how it works.
+7. ⁠highlight the changes for a better review
+8.> refine the inside fonts in the architecture diagram.
+9.> add a separate use case from hospital A to hospital B. (implement is the best course of action)
+10.  mention the AES in the encrypted patient DWN
+11.  reasons for storing on phone and such things based on assumptions
+12. use small h (here) instead of H
+13. 10-12% ai is recommended.
+14.> simulated nid service for verification of patients.
+15.> use a step by step process of how to reconstruct the key from the shares.
+16.> screenshots from the Poc like the flow of interface.
+17. add a configuration and reason about the 7 runs.
+18.> have to reason that the functional requirements have been verified.
+
+suggestion: IEEE and ACM journals. ACM TLT Q2, BCR Q1, LCBR no limit on pages, (suggested double column format)

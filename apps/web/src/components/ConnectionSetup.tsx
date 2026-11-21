@@ -4,7 +4,7 @@
 import React, { useEffect, useState } from 'react';
 import QRCode from 'qrcode';
 import Image from 'next/image';
-import { AgentType, createInvitation } from '../services/apiService';
+import { AgentType, agentHeaders, createInvitation } from '../services/apiService';
 import { usePolling } from '../hooks/usePolling';
 
 interface ConnectionSetupProps {
@@ -64,7 +64,7 @@ const ConnectionSetup = ({ agentType, label, onConnected, isVerifier = false }: 
         pharmacist: process.env.NEXT_PUBLIC_PHARMACIST_URL || 'http://localhost:4004',
         'healthcare-authority': process.env.NEXT_PUBLIC_HEALTHCARE_AUTHORITY_URL || 'http://localhost:4006',
       };
-      const resp = await fetch(`${AGENT_BASES[agentType]}${endpoint}`);
+      const resp = await fetch(`${AGENT_BASES[agentType]}${endpoint}`, { headers: agentHeaders(agentType) });
       const data = await resp.json();
       const items = Array.isArray(data) ? data : [data];
       const completed = items.find((c: any) => c.state === 'completed' || c.state === 'active');
